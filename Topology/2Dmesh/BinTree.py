@@ -8,7 +8,7 @@ import csv
 import os
 import sys
 
-# Default parameters (will be overridden by command line arguments)
+# Default parameters
 GRID_ROWS = 64     # n (number of rows)
 GRID_COLS = 64     # m (number of columns)
 INFO_SIZE = 500    # N (size of information)
@@ -37,8 +37,8 @@ def get_neighbors(coord: Tuple[int, int], n: int, m: int) -> List[Tuple[int, int
     """
     neighbors = []
     directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
-    for d in directions:
-        neighbor = (coord[0] + d[0], coord[1] + d[1])
+    for dx, dy in directions:
+        neighbor = (coord[0] + dx, coord[1] + dy)
         if 0 <= neighbor[0] < n and 0 <= neighbor[1] < m:
             neighbors.append(neighbor)
     return neighbors
@@ -94,9 +94,9 @@ def build_optimized_tree_overlay(n: int, m: int) -> Dict[int, List[int]]:
         # Get neighboring coordinates in priority order: right, down, diagonal
         neighbors = []
         if j+1 < m:  # Right
-            neighbors.append((i, j+1))
+            neighbors.append((i, j + 1))
         if i+1 < n:  # Down
-            neighbors.append((i+1, j))
+            neighbors.append((i + 1, j))
         if i+1 < n and j+1 < m:  # Diagonal down-right (for better connectivity)
             neighbors.append((i+1, j+1))
         
@@ -373,19 +373,15 @@ def print_state_grid(state: Dict[int, Set[int]], n: int, m: int, N: int, nodes: 
 
 def save_to_csv(active_edges: List[int], n: int, m: int, N: int, algorithm_name: str = "BinTreeBcast"):
     """Save timestep and active edge data to CSV file"""
-    # Create data directory if it doesn't exist
     data_dir = "data"
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
     
-    # Create filename
     filename = f"{data_dir}/{algorithm_name}_{n}_{m}_{N}.csv"
     
     with open(filename, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
-        # Write header
         writer.writerow(['timestep', 'active_edges'])
-        # Write data
         for timestep, edges in enumerate(active_edges, 1):
             writer.writerow([timestep, edges])
     
@@ -421,13 +417,12 @@ def calc_theoretical_min(n: int, m: int, N: int) -> int:
     - (N-1) additional rounds to send the rest of the information
     """
     # In a mesh, the tree depth is at most the Manhattan distance to the furthest corner
-    tree_depth = (n-1) + (m-1)  # From (0,0) to (n-1,m-1)
+    tree_depth = (n - 1) + (m - 1)  # From (0,0) to (n-1,m-1)
     return tree_depth + N - 1
 
 def main() -> None:
     global GRID_ROWS, GRID_COLS, INFO_SIZE
     
-    # Parse command line arguments
     if len(sys.argv) != 4:
         print("Usage: python3 BinTreeBcast.py <rows> <cols> <N>")
         print("Example: python3 BinTreeBcast.py 16 16 100")
@@ -445,7 +440,6 @@ def main() -> None:
         print("Error: All arguments must be positive integers")
         sys.exit(1)
     
-    # Use parameters
     n, m = GRID_ROWS, GRID_COLS
     start = START_POINT
     N = INFO_SIZE
@@ -454,7 +448,6 @@ def main() -> None:
     print(f"Information size: {N}")
     print(f"Start point: {start}")
 
-    # Calculate theoretical minimum
     theoretical_min = calc_theoretical_min(n, m, N)
     print(f"Theoretical minimum rounds: {theoretical_min}")
 
