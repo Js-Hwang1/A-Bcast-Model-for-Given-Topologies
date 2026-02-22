@@ -1,0 +1,21 @@
+<?xml version='1.0'?>
+<!DOCTYPE platform SYSTEM "https://simgrid.org/simgrid.dtd">
+<platform version="4.1">
+
+  <!-- Fat-Tree: 512 compute nodes, 2-level non-blocking -->
+  <!-- 32 leaf switches (16 hosts each) + 16 spine switches -->
+  <!--
+       Network: InfiniBand EDR (ORNL Summit / LLNL Sierra)
+       Bandwidth: 12.5 GBps (100 Gbps per port)
+       Latency:   100ns per switch hop
+       Ref: Mellanox EDR dual-rail fat-tree
+  -->
+
+  <cluster id="fattree" prefix="node-" suffix=""
+           radical="0-511"
+           speed="2000Gf"
+           bw="12.5GBps" lat="100ns"
+           topology="FAT_TREE"
+           topo_parameters="2 ; 16,32 ; 1,16 ; 1,1"/>
+
+</platform>

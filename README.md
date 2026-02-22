@@ -1,74 +1,168 @@
-# A-Bcast-Model-for-Given-Topologies
+# Broadcast Algorithm Simulation on Given Topologies
 
-This repository contains the simulation implementations used in our publication for evaluating  broadcast algorithms on several given topologies. The implementations live under the `Topology/` directory and include four algorithms used in the paper:
+Simulation framework for evaluating MPI broadcast algorithms across realistic network topologies using [SimGrid](https://simgrid.org/) SMPI. Compares `MPI_Bcast`, SRDA (Scatter + Recursive-Doubling Allgather), and BBS (frame-based broadcast) on four interconnect topologies at scales from 128 to 1,024 nodes.
 
-- BBS
-- Greedy
-- SRDA
-- BinTree
+## Quick Start
 
-Topologies available:
-
-- `Topology/16K3/` — 16-node MPL topology used in the paper
-- `Topology/2Dmesh/` — 2D mesh topology
-- `Topology/3Dmesh/` — 3D mesh topology
-
-Each topology folder contains four Python scripts: `BBS.py`, `Greedy.py`, `SRDA.py`, and `BinTree.py`.
-
-## Requirements
-
-- Python 3.8 or newer
-- NumPy and matplotlib (used for some statistics/plots). These are optional for running the simulations but recommended when producing figures.
-
-Install recommended packages with pip:
+All experiments run inside a Docker container (`simgrid/stable`) so you do not need to install SimGrid locally.
 
 ```bash
-python3 -m pip install --user numpy matplotlib
+# Build the runner
+docker run --rm -v $(pwd):/work -w /work/src simgrid/stable:latest \
+    smpicc -O2 -Wall -Wextra -o runner runner.c -lm
+
+# Run a single experiment
+docker run --rm -v $(pwd):/work -w /work/src simgrid/stable:latest \
+    smpirun -np 128 \
+        -platform ../topo/FatTree/platform_fattree_128.xml \
+        -hostfile ../topo/FatTree/hostfile_128 \
+        --cfg=smpi/host-speed:2000Gf \
+        --log=root.thres:warning \
+        ./runner mpi 1048576 64 0
 ```
 
-## How to run
-
-Each algorithm script exposes a simple command-line `main()` that expects a single integer argument: the information size (N) in chunks. The scripts print a short summary to the console and save a CSV file with timestep/active-edge statistics under a `data/` directory created next to the script.
-
-Examples (from the repository root):
-
-Run the 16K3 topology simulations (example N = 100):
+### Run All Experiments
 
 ```bash
-cd Topology/16K3
-python3 BBS.py 100
-python3 Greedy.py 100
-python3 SRDA.py 100
-python3 BinTree.py 100
+# Build once, then sweep (auto-detects CPU count)
+docker run --rm -v $(pwd):/work -w /work/src simgrid/stable:latest \
+    smpicc -O2 -Wall -Wextra -o runner runner.c -lm
+
+./src/sweep.sh --dry-run                          # preview commands
+./src/sweep.sh                                    # run all (root=0)
+./src/sweep.sh --roots all                        # all roots 0..N-1
+./src/sweep.sh --topos FatTree --sizes 128 --algos mpi   # subset
 ```
 
-Run the 2D mesh (p by q) simulations (example N = 100):
+## Container
 
+The exact environment used to produce all results is the Docker image [`simgrid/stable:latest`](https://hub.docker.com/r/simgrid/stable). A pre-built Singularity image (`bcast.sif`) is included for HPC use.
+
+| Component | Detail |
+|-----------|--------|
+| Base image | `simgrid/stable:latest` (Debian) |
+| SimGrid | 4.1 |
+| Compiler | GCC + `smpicc` (SimGrid's MPI C wrapper) |
+| Launcher | `smpirun` (simulated MPI execution) |
+
+**Docker** (local):
 ```bash
-cd Topology/2Dmesh
-python3 BBS.py p q 100
-python3 Greedy.py p q 100
-python3 SRDA.py p q 100
-python3 BinTree.py p q 100
+docker run --rm -v $(pwd):/work -w /work simgrid/stable:latest <command>
 ```
 
-Run the 3D mesh (p by q by r) simulations (example N = 100):
-
+**Singularity** (HPC):
 ```bash
-cd Topology/3Dmesh
-python3 BBS.py p q r 100
-python3 Greedy.py p q r 100
-python3 SRDA.py p q r 100
-python3 BinTree.py p q r 100
+singularity exec --bind $(pwd) bcast.sif <command>
 ```
 
-## Reproducing results for the paper
+Both use the identical SimGrid runtime — results are reproducible across environments.
 
-1. Choose topology and algorithm as above.
-2. Use the same `N` values as reported in the paper and run the script. The script will print summary stats and create the CSV data file.
-3. Use the CSV data for plotting or post-processing as required for figures/tables.
+## Algorithms
 
-## Contact / Notes
+| Algorithm | Key | Description |
+|-----------|-----|-------------|
+| MPI_Bcast | `mpi` | SimGrid's built-in binomial-tree broadcast (baseline) |
+| SRDA | `srda` | Scatter + Recursive-Doubling Allgather. `MPI_Scatter` distributes N equal pieces, then log2(N) rounds of `MPI_Sendrecv` (rank XOR 2^k). Requires power-of-2 N. |
+| BBS | `bbs` | Frame-based broadcast from a precomputed `.plan` file |
 
-For questions and issue, contact the authors listed on the paper.
+## Topologies
 
+All network parameters are derived from published hardware specifications (see [`topo_reference.txt`](topo_reference.txt) for BibTeX citations).
+
+| Topology | Interconnect | Bandwidth | Latency | Modeled After |
+|----------|-------------|-----------|---------|---------------|
+| 2Dmesh | InfiniBand NDR 400 | 50 GB/s | 100 ns | NVIDIA Eos |
+| Butterfly | InfiniBand EDR | 12.5 GB/s | 100 ns | Kim & Dally, ISCA '07 |
+| Dragonfly | Cray Aries | 5.25 GB/s | 100/200/400 ns | Theta (ALCF) |
+| FatTree | InfiniBand EDR | 12.5 GB/s | 100 ns | Summit (ORNL) |
+
+Pre-generated platform XMLs and hostfiles for N = 128, 256, 512, 1024 are in `topo/`.
+
+## Runner Usage
+
+```
+smpirun -np N -platform <xml> -hostfile <hf> \
+    ./runner <algo> <msg_bytes> [nchunks] [root] [plan_file] [out_json]
+```
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `algo` | (required) | `mpi`, `srda`, or `bbs` |
+| `msg_bytes` | (required) | Message size in bytes |
+| `nchunks` | 1 | Number of chunks for pipelining |
+| `root` | 0 | Broadcast root rank |
+| `plan_file` | `_` | Path to BBS plan file (`_` = none) |
+| `out_json` | `_` | Path to write JSON result (`_` = none) |
+
+## Output
+
+Each experiment writes a JSON file to `data/{Topo}/{algo}/N{N}_MSG{M}_R{root}.json`:
+
+```json
+{
+  "algorithm": "srda",
+  "nodes": 512,
+  "msg_bytes": 67108864,
+  "nchunks": 4096,
+  "root": 42,
+  "rounds": null,
+  "time_sec": 0.018013,
+  "correct": true
+}
+```
+
+Run `python3 src/aggregate.py` to compute mean +/- stdev across all roots and produce `data/summary.csv`.
+
+## Experiment Parameters
+
+| Parameter | Values |
+|-----------|--------|
+| Topologies | 2Dmesh, Butterfly, Dragonfly, FatTree |
+| N | 128, 256, 512, 1024 |
+| Message sizes | 256 B, 1 KB, 4 KB, 16 KB, 64 KB, 256 KB, 1 MB, 4 MB, 16 MB, 64 MB |
+| Algorithms | MPI_Bcast, SRDA |
+| Broadcast root | Every rank 0..N-1 (results averaged) |
+| Host speed | 2000 GFlops |
+| **Total** | **153,600 experiments** |
+
+## Results
+
+See [`RESULTS.md`](RESULTS.md) for full tables (mean +/- stdev across all root ranks).
+
+Key findings:
+- **Butterfly**: SRDA achieves up to **8.7x** speedup over MPI_Bcast (N=512, 16 MB)
+- **2Dmesh**: SRDA overtakes MPI at message sizes above ~4 MB (up to 1.8x)
+- **Dragonfly / FatTree**: MPI_Bcast's binomial tree remains faster at all sizes due to hierarchical structure
+
+## Project Structure
+
+```
+.
+├── src/
+│   ├── runner.c                # Broadcast simulator (MPI, SRDA, BBS)
+│   ├── Makefile                # Build and run targets
+│   ├── topology_generater.py   # Generate platform XMLs + hostfiles
+│   ├── aggregate.py            # Aggregate results across roots
+│   ├── sweep.sh                # Parallel experiment dispatch
+│   └── backfill.sh             # Re-run missing experiments
+├── topo/                       # SimGrid platform XMLs + hostfiles
+│   ├── 2Dmesh/
+│   ├── Butterfly/
+│   ├── Dragonfly/
+│   └── FatTree/
+├── data/                       # Results (JSON, hive-partitioned)
+├── bcast.sif                   # Singularity container image
+├── bcast.def                   # Singularity definition (reference)
+├── topo_reference.txt          # Network parameter citations
+├── RESULTS.md                  # Tabulated results
+└── LEGACY/                     # Original Python discrete-time models
+```
+
+## References
+
+- Casanova, H. et al. "Versatile, Scalable, and Accurate Simulation of Distributed Applications and Platforms." *JPDC*, 74(10), 2014.
+- Degomme, A. et al. "Simulating MPI Applications: The SMPI Approach." *IEEE TPDS*, 28(8), 2017.
+- Thakur, R. et al. "Optimization of Collective Communication Operations in MPICH." *IJHPCA*, 19(1), 2005.
+- Kim, J. and Dally, W. "Flattened Butterfly: A Cost-Efficient Topology for High-Radix Networks." *ISCA*, 2007.
+- Kim, J. et al. "Technology-Driven, Highly-Scalable Dragonfly Topology." *ISCA*, 2008.
+- Leiserson, C. "Fat-Trees: Universal Networks for Hardware-Efficient Supercomputing." *IEEE ToC*, 1985.

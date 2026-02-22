@@ -1,0 +1,24 @@
+<?xml version='1.0'?>
+<!DOCTYPE platform SYSTEM "https://simgrid.org/simgrid.dtd">
+<platform version="4.1">
+
+  <!-- Dragonfly: 256 compute nodes -->
+  <!-- 4 groups x 4 chassis x 4 routers x 4 nodes -->
+  <!--
+       Network: Cray Aries (Theta XC40 / Piz Daint XC50)
+       Bandwidth: 5.25 GBps (Aries electrical, per direction)
+       Latency:   100ns per router hop
+       Inter-group (blue) links:   1 per group pair
+       Inter-chassis (black) links: 1 per chassis pair
+       Intra-chassis (green) links: 1 per router pair
+       Ref: Kim et al., ISCA 2008; Cray XC Network white paper
+  -->
+
+  <cluster id="dragonfly" prefix="node-" suffix=""
+           radical="0-255"
+           speed="2000Gf"
+           bw="5.25GBps" lat="100ns"
+           topology="DRAGONFLY"
+           topo_parameters="4,1 ; 4,1 ; 4,1 ; 4"/>
+
+</platform>

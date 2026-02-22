@@ -1,0 +1,13 @@
+LEGACY/
+paper.tex
+topo_reference.txt
+.claude
+results/
+plans/
+bcast.sif
+.DS_Store
+*.pdf
+data/
+.env
+bcast.def
+*.tex

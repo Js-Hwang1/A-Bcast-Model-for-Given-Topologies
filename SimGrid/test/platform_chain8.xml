@@ -1,0 +1,43 @@
+<?xml version='1.0'?>
+<!DOCTYPE platform SYSTEM "https://simgrid.org/simgrid.dtd">
+<platform version="4.1">
+
+  <!--
+    8-node linear chain:  0 — 1 — 2 — 3 — 4 — 5 — 6 — 7
+
+    MPI_Bcast uses a binomial tree: rank 0 sends to 1, 2, 4.
+    But 0→2 is 2 hops, 0→4 is 4 hops — wasteful on a chain.
+    A simple pipeline (forward chunks one hop at a time) is optimal.
+  -->
+
+  <zone id="chain" routing="Floyd">
+
+    <host id="node-0" speed="2000Gf"/>
+    <host id="node-1" speed="2000Gf"/>
+    <host id="node-2" speed="2000Gf"/>
+    <host id="node-3" speed="2000Gf"/>
+    <host id="node-4" speed="2000Gf"/>
+    <host id="node-5" speed="2000Gf"/>
+    <host id="node-6" speed="2000Gf"/>
+    <host id="node-7" speed="2000Gf"/>
+
+    <!-- 7 links, same specs as 16K3 (InfiniBand NDR 400) -->
+    <link id="link-0-1" bandwidth="50GBps" latency="500ns"/>
+    <link id="link-1-2" bandwidth="50GBps" latency="500ns"/>
+    <link id="link-2-3" bandwidth="50GBps" latency="500ns"/>
+    <link id="link-3-4" bandwidth="50GBps" latency="500ns"/>
+    <link id="link-4-5" bandwidth="50GBps" latency="500ns"/>
+    <link id="link-5-6" bandwidth="50GBps" latency="500ns"/>
+    <link id="link-6-7" bandwidth="50GBps" latency="500ns"/>
+
+    <!-- Direct neighbor routes only; Floyd fills in multi-hop -->
+    <route src="node-0" dst="node-1"> <link_ctn id="link-0-1"/> </route>
+    <route src="node-1" dst="node-2"> <link_ctn id="link-1-2"/> </route>
+    <route src="node-2" dst="node-3"> <link_ctn id="link-2-3"/> </route>
+    <route src="node-3" dst="node-4"> <link_ctn id="link-3-4"/> </route>
+    <route src="node-4" dst="node-5"> <link_ctn id="link-4-5"/> </route>
+    <route src="node-5" dst="node-6"> <link_ctn id="link-5-6"/> </route>
+    <route src="node-6" dst="node-7"> <link_ctn id="link-6-7"/> </route>
+
+  </zone>
+</platform>
