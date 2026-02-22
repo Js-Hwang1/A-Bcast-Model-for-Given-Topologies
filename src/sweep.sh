@@ -32,9 +32,8 @@ set -euo pipefail
 # ---- Paths ----
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TOPO_DIR="$SCRIPT_DIR/../topo"
-PLAN_DIR="$SCRIPT_DIR/../plans"
 DATA_DIR="$SCRIPT_DIR/../data"
-BINARY="$SCRIPT_DIR/runner"
+BINARY="$SCRIPT_DIR/../bin/runner"
 HOST_SPEED="2000Gf"
 
 # ---- Default parameter space ----
@@ -120,16 +119,7 @@ platform_path() {
 }
 
 choose_chunks() {
-    local msg=$1 topo=$2 n=$3 root=$4
-    local params="$PLAN_DIR/$topo/${n}_root${root}.params"
-    if [[ -f "$params" ]]; then
-        local k
-        k=$(python3 -c "
-import json; p=json.load(open('$params'))
-k=p.get('optimal_K',{}).get('$msg',{}).get('K_opt')
-if k: print(k)" 2>/dev/null)
-        [[ -n "$k" && "$k" -gt 0 ]] 2>/dev/null && echo "$k" && return
-    fi
+    local msg=$1
     local nc=$(( msg / 16384 )); (( nc < 4 )) && nc=4; echo "$nc"
 }
 
@@ -137,6 +127,7 @@ if k: print(k)" 2>/dev/null)
 if [[ ! -x "$BINARY" ]]; then
     echo "Building runner..."
     if [[ -n "$SMPI_PREFIX" ]]; then
+        mkdir -p "$(dirname "$BINARY")"
         $SMPI_PREFIX smpicc -O2 -Wall -Wextra -o "$BINARY" "$SCRIPT_DIR/runner.c" -lm
     else
         make -C "$SCRIPT_DIR" -s
@@ -148,7 +139,6 @@ JOBFILE=$(mktemp "${TMPDIR:-/tmp}/sweep_jobs.XXXXXX")
 trap 'rm -f "$JOBFILE"' EXIT
 
 NJOBS=0
-SKIPPED=0
 
 for TOPO in "${TOPOS[@]}"; do
     for N in "${SIZES[@]}"; do
@@ -164,17 +154,7 @@ for TOPO in "${TOPOS[@]}"; do
         for ALGO in "${ALGOS[@]}"; do
             for MSG in "${MSG_SIZES[@]}"; do
                 for ROOT in $ROOTS; do
-                    NC=$(choose_chunks "$MSG" "$TOPO" "$N" "$ROOT")
-
-                    # BBS plan file depends on root
-                    PLAN_ARG="_"
-                    if [[ "$ALGO" == "bbs" ]]; then
-                        PLAN_ARG="$PLAN_DIR/$TOPO/${N}_root${ROOT}.plan"
-                        if [[ ! -f "$PLAN_ARG" ]]; then
-                            SKIPPED=$((SKIPPED + 1))
-                            continue
-                        fi
-                    fi
+                    NC=$(choose_chunks "$MSG")
 
                     OUTJSON="$DATA_DIR/$TOPO/$ALGO/N${N}_MSG${MSG}_R${ROOT}.json"
                     OUTDIR=$(dirname "$OUTJSON")
@@ -195,7 +175,7 @@ for TOPO in "${TOPOS[@]}"; do
                         CMD+=" --cfg=tracing/smpi/internals:yes"
                     fi
 
-                    CMD+=" $BINARY $ALGO $MSG $NC $ROOT $PLAN_ARG $OUTJSON"
+                    CMD+=" $BINARY $ALGO $MSG $NC $ROOT $OUTJSON"
 
                     echo "$CMD" >> "$JOBFILE"
                     NJOBS=$((NJOBS + 1))
@@ -217,8 +197,6 @@ echo "  Algorithms : ${ALGOS[*]}"
 echo "  Msg sizes  : ${#MSG_SIZES[@]}"
 echo "  Roots      : $ROOT_MODE"
 echo "  Total jobs : $NJOBS"
-[[ $SKIPPED -gt 0 ]] && \
-echo "  Skipped    : $SKIPPED (missing plan files)"
 echo "  Workers    : $JOBS"
 echo "  Output     : $DATA_DIR/"
 echo "=============================================="

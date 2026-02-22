@@ -18,7 +18,7 @@
 #
 # Usage:
 #   module load slurm
-#   sbatch src/backfill.slurm
+#   sbatch slurm/backfill.slurm
 
 set -euo pipefail
 
@@ -41,8 +41,9 @@ fi
 
 # Compile runner inside the container
 echo "Building runner..."
+mkdir -p "$PROJ_DIR/bin"
 singularity exec --bind "$PROJ_DIR" "$SIF" \
-    smpicc -O2 -Wall -Wextra -o "$SRC_DIR/runner" "$SRC_DIR/runner.c" -lm
+    smpicc -O2 -Wall -Wextra -o "$PROJ_DIR/bin/runner" "$SRC_DIR/runner.c" -lm
 echo ""
 
 # Run backfill with low concurrency (4 workers to avoid OOM)

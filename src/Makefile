@@ -3,7 +3,6 @@ CFLAGS   = -O2 -Wall -Wextra
 LDFLAGS  = -lm
 
 TOPO_DIR  = ../topo
-PLAN_DIR  = ../plans
 RES_DIR   = ../results
 OUTDIR    = ../data
 
@@ -15,9 +14,9 @@ MSG       = 1048576
 CHUNKS    = 64
 ROOT      = 0
 
-TARGET    = runner
+BIN_DIR   = ../bin
+TARGET    = $(BIN_DIR)/runner
 OUTFILE   = $(OUTDIR)/$(TOPO)/$(ALGO)/N$(N)_MSG$(MSG)_R$(ROOT).json
-PLAN_FILE = _
 TRACE     =
 
 .PHONY: all clean gen gen-all run sweep
@@ -25,8 +24,11 @@ TRACE     =
 # ---- Build ----
 all: $(TARGET)
 
-$(TARGET): runner.c
+$(TARGET): runner.c | $(BIN_DIR)
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
 
 # ---- Generate topologies ----
 gen-all:
@@ -70,7 +72,7 @@ run: $(TARGET)
 	smpirun -np $(N) -platform $(PLATFORM) -hostfile $(HOSTFILE) \
 		--cfg=smpi/host-speed:2000Gf --cfg=smpi/display-timing:yes \
 		--log=root.thres:warning $(TRACE_FLAGS) \
-		./$(TARGET) $(ALGO) $(MSG) $(CHUNKS) $(ROOT) $(PLAN_FILE) $(OUTFILE)
+		./$(TARGET) $(ALGO) $(MSG) $(CHUNKS) $(ROOT) $(OUTFILE)
 
 # ---- Sweep: parallel dispatch of all experiments ----
 sweep: $(TARGET)

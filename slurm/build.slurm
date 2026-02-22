@@ -17,7 +17,7 @@
 # Usage (from login node):
 #   module load slurm
 #   cd /path/to/A-Bcast-Model-for-Given-Topologies
-#   sbatch src/build.slurm
+#   sbatch slurm/build.slurm
 
 set -euo pipefail
 
@@ -50,14 +50,15 @@ echo ""
 
 # Compile the runner inside the container (no make in image, use smpicc directly)
 echo "=== Compiling runner ==="
-rm -f "$SRC_DIR/runner"
+mkdir -p "$PROJ_DIR/bin"
+rm -f "$PROJ_DIR/bin/runner"
 singularity exec --bind "$PROJ_DIR" "$SIF" \
-    smpicc -O2 -Wall -Wextra -o "$SRC_DIR/runner" "$SRC_DIR/runner.c" -lm
+    smpicc -O2 -Wall -Wextra -o "$PROJ_DIR/bin/runner" "$SRC_DIR/runner.c" -lm
 echo ""
 
 echo "=== Done ==="
 echo "Container : $SIF"
-echo "Runner    : $SRC_DIR/runner"
+echo "Runner    : $PROJ_DIR/bin/runner"
 echo "End       : $(date)"
 echo ""
-echo "Next step: sbatch src/sweep.slurm"
+echo "Next step: sbatch slurm/sweep.slurm"

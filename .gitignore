@@ -1,9 +1,6 @@
 LEGACY/
 paper.tex
-topo_reference.txt
 .claude
-results/
-plans/
 bcast.sif
 .DS_Store
 *.pdf
@@ -11,3 +8,11 @@ data/
 .env
 bcast.def
 *.tex
+bin/
+slurm/
+__pycache__/
+*.pyc
+*.aux
+*.log
+*.out
+*.png

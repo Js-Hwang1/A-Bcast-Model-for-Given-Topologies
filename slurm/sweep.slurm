@@ -17,13 +17,13 @@
 # through the container for dynamic load balancing.
 #
 # Prerequisites:
-#   sbatch src/build.slurm   # wait for bcast.sif to appear
+#   sbatch slurm/build.slurm   # wait for bcast.sif to appear
 #
 # Usage:
 #   module load slurm
 #   cd /path/to/A-Bcast-Model-for-Given-Topologies
-#   sbatch src/sweep.slurm
-#   sbatch src/sweep.slurm --algos mpi,srda
+#   sbatch slurm/sweep.slurm
+#   sbatch slurm/sweep.slurm --algos mpi,srda
 
 set -euo pipefail
 
@@ -41,14 +41,15 @@ echo ""
 
 if [[ ! -f "$SIF" ]]; then
     echo "ERROR: Container not found at $SIF" >&2
-    echo "  Build it first:  sbatch src/build.slurm" >&2
+    echo "  Build it first:  sbatch slurm/build.slurm" >&2
     exit 1
 fi
 
 # Compile runner inside the container (uses smpicc from container)
 echo "Building runner..."
+mkdir -p "$PROJ_DIR/bin"
 singularity exec --bind "$PROJ_DIR" "$SIF" \
-    smpicc -O2 -Wall -Wextra -o "$SRC_DIR/runner" "$SRC_DIR/runner.c" -lm
+    smpicc -O2 -Wall -Wextra -o "$PROJ_DIR/bin/runner" "$SRC_DIR/runner.c" -lm
 echo ""
 
 # Run the sweep: parallel dispatches on host, each smpirun goes through container

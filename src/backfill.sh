@@ -16,7 +16,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TOPO_DIR="$SCRIPT_DIR/../topo"
 DATA_DIR="$SCRIPT_DIR/../data"
-BINARY="$SCRIPT_DIR/runner"
+BINARY="$SCRIPT_DIR/../bin/runner"
 HOST_SPEED="2000Gf"
 
 TOPOS=(2Dmesh Butterfly Dragonfly FatTree)
@@ -79,6 +79,7 @@ choose_chunks() {
 if [[ ! -x "$BINARY" ]]; then
     echo "Building runner..."
     if [[ -n "$SMPI_PREFIX" ]]; then
+        mkdir -p "$(dirname "$BINARY")"
         $SMPI_PREFIX smpicc -O2 -Wall -Wextra -o "$BINARY" "$SCRIPT_DIR/runner.c" -lm
     else
         make -C "$SCRIPT_DIR" -s
@@ -115,7 +116,7 @@ for TOPO in "${TOPOS[@]}"; do
                     CMD+=" --cfg=smpi/host-speed:$HOST_SPEED"
                     CMD+=" --cfg=smpi/display-timing:yes"
                     CMD+=" --log=root.thres:warning"
-                    CMD+=" $BINARY $ALGO $MSG $NC $ROOT _ $OUTJSON"
+                    CMD+=" $BINARY $ALGO $MSG $NC $ROOT $OUTJSON"
 
                     echo "$CMD" >> "$JOBFILE"
                     NMISSING=$((NMISSING + 1))

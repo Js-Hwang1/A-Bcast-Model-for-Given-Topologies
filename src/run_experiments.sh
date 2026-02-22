@@ -15,9 +15,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TOPO_DIR="$SCRIPT_DIR/../topo"
-PLAN_DIR="$SCRIPT_DIR/../plans"
 RES_DIR="$SCRIPT_DIR/../results"
-BINARY="$SCRIPT_DIR/runner"
+BINARY="$SCRIPT_DIR/../bin/runner"
 HOST_SPEED="--cfg=smpi/host-speed:2000Gf"
 QUIET="--log=root.thres:warning"
 
@@ -50,16 +49,7 @@ MSG_SIZES=(
 )
 
 choose_chunks() {
-    local msg=$1 topo=$2 n=$3 root=$4
-    local params="$PLAN_DIR/$topo/${n}_root${root}.params"
-    if [[ -f "$params" ]]; then
-        local k
-        k=$(python3 -c "
-import json; p=json.load(open('$params'))
-k=p.get('optimal_K',{}).get('$msg',{}).get('K_opt')
-if k: print(k)" 2>/dev/null)
-        [[ -n "$k" && "$k" -gt 0 ]] 2>/dev/null && echo "$k" && return
-    fi
+    local msg=$1
     local nc=$(( msg / 16384 )); (( nc < 4 )) && nc=4; echo "$nc"
 }
 
@@ -125,7 +115,7 @@ for TOPO in "${TOPOS[@]}"; do
         echo "--- $TOPO  N=$N ---"
 
         for MSG in "${MSG_SIZES[@]}"; do
-            NC=$(choose_chunks "$MSG" "$TOPO" "$N" "$ROOT")
+            NC=$(choose_chunks "$MSG")
 
             if   [ "$MSG" -ge 1048576 ]; then
                 HR="$(( MSG / 1048576 )) MB"
@@ -136,21 +126,10 @@ for TOPO in "${TOPOS[@]}"; do
             fi
 
             for ALGO in "${ALGOS[@]}"; do
-                # BBS needs a plan file
-                EXTRA_ARGS=""
-                if [ "$ALGO" = "bbs" ]; then
-                    PLAN_FILE="$PLAN_DIR/$TOPO/${N}_root${ROOT}.plan"
-                    if [ ! -f "$PLAN_FILE" ]; then
-                        echo "  $HR  $ALGO : [plan not found, skipping]"
-                        continue
-                    fi
-                    EXTRA_ARGS="$PLAN_FILE"
-                fi
-
                 OUTPUT=$(smpirun -np "$N" -platform "$PLATFORM" \
                     -hostfile "$HOSTFILE" \
                     $HOST_SPEED $QUIET \
-                    "$BINARY" "$ALGO" "$MSG" "$NC" "$ROOT" $EXTRA_ARGS \
+                    "$BINARY" "$ALGO" "$MSG" "$NC" "$ROOT" \
                     2>/dev/null || true)
 
                 if echo "$OUTPUT" | grep -q '^time_sec'; then

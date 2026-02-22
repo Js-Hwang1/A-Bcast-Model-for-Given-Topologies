@@ -17,7 +17,7 @@ from pathlib import Path
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 TOPOS = ["2Dmesh", "Butterfly", "Dragonfly", "FatTree"]
-ALGOS = ["mpi", "srda", "bbs", "pipe"]
+ALGOS = ["mpi", "srda", "pipe"]
 SIZES = [128, 256, 512, 1024]
 MSGS = [256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864]
 
@@ -79,14 +79,13 @@ def main():
     # Group by topology for organized output
     for topo in TOPOS:
         print(f"\n### {topo}\n")
-        print("| N | MSG | MPI | SRDA | BBS | Pipe | Best Speedup |")
-        print("|---|-----|-----|------|-----|------|-------------:|")
+        print("| N | MSG | MPI | SRDA | Pipe | Best Speedup |")
+        print("|---|-----|-----|------|------|-------------:|")
 
         for n in SIZES:
             for msg in MSGS:
                 mpi_key = (topo, "mpi", n, msg)
                 srda_key = (topo, "srda", n, msg)
-                bbs_key = (topo, "bbs", n, msg)
                 pipe_key = (topo, "pipe", n, msg)
 
                 # Need at least MPI as baseline
@@ -100,7 +99,7 @@ def main():
                 cols = [f"{n}", human_bytes(msg), fmt_time(mpi_mean, mpi_std)]
                 best_mean = mpi_mean
 
-                for key in [srda_key, bbs_key, pipe_key]:
+                for key in [srda_key, pipe_key]:
                     if key in results:
                         times = results[key]
                         mean = sum(times) / len(times)

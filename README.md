@@ -1,15 +1,15 @@
 # Broadcast Algorithm Simulation on Given Topologies
 
-Simulation framework for evaluating MPI broadcast algorithms across realistic network topologies using [SimGrid](https://simgrid.org/) SMPI. Compares `MPI_Bcast`, SRDA (Scatter + Recursive-Doubling Allgather), and BBS (frame-based broadcast) on four interconnect topologies at scales from 128 to 1,024 nodes.
+Simulation framework for evaluating MPI broadcast algorithms across realistic network topologies using [SimGrid](https://simgrid.org/) SMPI. Compares `MPI_Bcast`, SRDA (Scatter + Recursive-Doubling Allgather), and pipelined chain broadcast on four interconnect topologies at scales from 128 to 1,024 nodes.
 
 ## Quick Start
 
 All experiments run inside a Docker container (`simgrid/stable`) so you do not need to install SimGrid locally.
 
 ```bash
-# Build the runner
+# Build the runner (outputs to bin/)
 docker run --rm -v $(pwd):/work -w /work/src simgrid/stable:latest \
-    smpicc -O2 -Wall -Wextra -o runner runner.c -lm
+    make
 
 # Run a single experiment
 docker run --rm -v $(pwd):/work -w /work/src simgrid/stable:latest \
@@ -18,20 +18,24 @@ docker run --rm -v $(pwd):/work -w /work/src simgrid/stable:latest \
         -hostfile ../topo/FatTree/hostfile_128 \
         --cfg=smpi/host-speed:2000Gf \
         --log=root.thres:warning \
-        ./runner mpi 1048576 64 0
+        ../bin/runner mpi 1048576 64 0
 ```
 
-### Run All Experiments
+### Workflow
 
 ```bash
-# Build once, then sweep (auto-detects CPU count)
-docker run --rm -v $(pwd):/work -w /work/src simgrid/stable:latest \
-    smpicc -O2 -Wall -Wextra -o runner runner.c -lm
+# 1. Generate topology files (if not already present)
+python3 src/topology_generater.py --all
 
+# 2. Build and sweep all experiments
+docker run --rm -v $(pwd):/work -w /work/src simgrid/stable:latest make
 ./src/sweep.sh --dry-run                          # preview commands
 ./src/sweep.sh                                    # run all (root=0)
 ./src/sweep.sh --roots all                        # all roots 0..N-1
 ./src/sweep.sh --topos FatTree --sizes 128 --algos mpi   # subset
+
+# 3. Aggregate results
+python3 src/aggregate.py
 ```
 
 ## Container
@@ -63,11 +67,11 @@ Both use the identical SimGrid runtime — results are reproducible across envir
 |-----------|-----|-------------|
 | MPI_Bcast | `mpi` | SimGrid's built-in binomial-tree broadcast (baseline) |
 | SRDA | `srda` | Scatter + Recursive-Doubling Allgather. `MPI_Scatter` distributes N equal pieces, then log2(N) rounds of `MPI_Sendrecv` (rank XOR 2^k). Requires power-of-2 N. |
-| BBS | `bbs` | Frame-based broadcast from a precomputed `.plan` file |
+| Pipelined | `pipe` | Chain-pipeline broadcast: root sends chunks sequentially along a chain |
 
 ## Topologies
 
-All network parameters are derived from published hardware specifications (see [`topo_reference.txt`](topo_reference.txt) for BibTeX citations).
+All network parameters are derived from published hardware specifications (see [`docs/topo_reference.txt`](docs/topo_reference.txt) for BibTeX citations).
 
 | Topology | Interconnect | Bandwidth | Latency | Modeled After |
 |----------|-------------|-----------|---------|---------------|
@@ -82,16 +86,15 @@ Pre-generated platform XMLs and hostfiles for N = 128, 256, 512, 1024 are in `to
 
 ```
 smpirun -np N -platform <xml> -hostfile <hf> \
-    ./runner <algo> <msg_bytes> [nchunks] [root] [plan_file] [out_json]
+    bin/runner <algo> <msg_bytes> [nchunks] [root] [out_json]
 ```
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `algo` | (required) | `mpi`, `srda`, or `bbs` |
+| `algo` | (required) | `mpi`, `srda`, or `pipe` |
 | `msg_bytes` | (required) | Message size in bytes |
-| `nchunks` | 1 | Number of chunks for pipelining |
+| `nchunks` | 64 | Number of chunks for pipelining |
 | `root` | 0 | Broadcast root rank |
-| `plan_file` | `_` | Path to BBS plan file (`_` = none) |
 | `out_json` | `_` | Path to write JSON result (`_` = none) |
 
 ## Output
@@ -105,7 +108,6 @@ Each experiment writes a JSON file to `data/{Topo}/{algo}/N{N}_MSG{M}_R{root}.js
   "msg_bytes": 67108864,
   "nchunks": 4096,
   "root": 42,
-  "rounds": null,
   "time_sec": 0.018013,
   "correct": true
 }
@@ -127,7 +129,7 @@ Run `python3 src/aggregate.py` to compute mean +/- stdev across all roots and pr
 
 ## Results
 
-See [`RESULTS.md`](RESULTS.md) for full tables (mean +/- stdev across all root ranks).
+See [`docs/RESULTS.md`](docs/RESULTS.md) for full tables (mean +/- stdev across all root ranks).
 
 Key findings:
 - **Butterfly**: SRDA achieves up to **8.7x** speedup over MPI_Bcast (N=512, 16 MB)
@@ -138,23 +140,27 @@ Key findings:
 
 ```
 .
-├── src/
-│   ├── runner.c                # Broadcast simulator (MPI, SRDA, BBS)
-│   ├── Makefile                # Build and run targets
+├── src/                        # Core source code
+│   ├── runner.c                # Broadcast simulator (MPI, SRDA, pipe)
+│   ├── Makefile                # Build (outputs to bin/) and run targets
 │   ├── topology_generater.py   # Generate platform XMLs + hostfiles
 │   ├── aggregate.py            # Aggregate results across roots
+│   ├── plot_topology.py        # Topology visualization
 │   ├── sweep.sh                # Parallel experiment dispatch
-│   └── backfill.sh             # Re-run missing experiments
+│   ├── backfill.sh             # Re-run missing experiments
+│   └── run_experiments.sh      # Sequential experiment sweep
+├── bin/                        # Build outputs (gitignored)
 ├── topo/                       # SimGrid platform XMLs + hostfiles
-│   ├── 2Dmesh/
-│   ├── Butterfly/
-│   ├── Dragonfly/
-│   └── FatTree/
-├── data/                       # Results (JSON, hive-partitioned)
-├── bcast.sif                   # Singularity container image
+├── data/                       # Results — JSON (gitignored)
+├── docs/                       # Documentation
+│   ├── RESULTS.md              # Tabulated results
+│   ├── update.md               # Development notes
+│   └── topo_reference.txt      # Network parameter citations
+├── slurm/                      # HPC job scripts (gitignored)
+├── PoC/                        # Proof-of-concept scripts and tests
+│   ├── chain_test.c            # Chain topology test
+│   └── test/                   # Star-topology tests & plots
 ├── bcast.def                   # Singularity definition (reference)
-├── topo_reference.txt          # Network parameter citations
-├── RESULTS.md                  # Tabulated results
 └── LEGACY/                     # Original Python discrete-time models
 ```
 
