@@ -75,6 +75,11 @@ choose_chunks() {
     echo "$nc"
 }
 
+topo_cfg_path() {
+    local topo=$1 n=$2
+    echo "$TOPO_DIR/$topo/topo_${n}.cfg"
+}
+
 # ---- Build runner if needed ----
 if [[ ! -x "$BINARY" ]]; then
     echo "Building runner..."
@@ -117,6 +122,9 @@ for TOPO in "${TOPOS[@]}"; do
                     CMD+=" --cfg=smpi/display-timing:yes"
                     CMD+=" --log=root.thres:warning"
                     CMD+=" $BINARY $ALGO $MSG $NC $ROOT $OUTJSON"
+                    if [[ "$ALGO" == "test" ]]; then
+                        CMD+=" $(topo_cfg_path "$TOPO" "$N")"
+                    fi
 
                     echo "$CMD" >> "$JOBFILE"
                     NMISSING=$((NMISSING + 1))

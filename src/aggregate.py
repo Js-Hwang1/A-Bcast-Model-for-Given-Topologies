@@ -17,7 +17,7 @@ from pathlib import Path
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 TOPOS = ["2Dmesh", "Butterfly", "Dragonfly", "FatTree"]
-ALGOS = ["mpi", "srda", "pipe"]
+ALGOS = ["mpi", "srda", "pipe", "test"]
 SIZES = [128, 256, 512, 1024]
 MSGS = [256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864]
 

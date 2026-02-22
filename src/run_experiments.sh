@@ -126,10 +126,14 @@ for TOPO in "${TOPOS[@]}"; do
             fi
 
             for ALGO in "${ALGOS[@]}"; do
+                TOPO_CFG=""
+                if [[ "$ALGO" == "test" ]]; then
+                    TOPO_CFG="$TOPO_DIR/$TOPO/topo_${N}.cfg"
+                fi
                 OUTPUT=$(smpirun -np "$N" -platform "$PLATFORM" \
                     -hostfile "$HOSTFILE" \
                     $HOST_SPEED $QUIET \
-                    "$BINARY" "$ALGO" "$MSG" "$NC" "$ROOT" \
+                    "$BINARY" "$ALGO" "$MSG" "$NC" "$ROOT" _ $TOPO_CFG \
                     2>/dev/null || true)
 
                 if echo "$OUTPUT" | grep -q '^time_sec'; then

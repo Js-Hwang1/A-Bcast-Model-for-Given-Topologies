@@ -436,6 +436,37 @@ GENERATORS = {
 }
 
 
+# ============================================================
+# Topology config writer (for runner.c BFS-tree broadcast)
+# ============================================================
+def write_topo_cfg(topo_name, n, outdir):
+    """Write a compact topology config file for runner.c to parse.
+
+    Format (single line):
+        mesh <rows> <cols>
+        butterfly <dim>
+        fattree <hosts_per_leaf>
+        dragonfly <G> <C> <R> <P>
+    """
+    path = os.path.join(outdir, f"topo_{n}.cfg")
+    with open(path, "w") as f:
+        if topo_name == "2Dmesh":
+            p, q = MESH_SIZES[n]
+            f.write(f"mesh {p} {q}\n")
+        elif topo_name == "Butterfly":
+            dim = int(math.log2(n))
+            f.write(f"butterfly {dim}\n")
+        elif topo_name == "FatTree":
+            hpl = 16
+            while hpl > n // 2 and hpl > 2:
+                hpl //= 2
+            f.write(f"fattree {hpl}\n")
+        elif topo_name == "Dragonfly":
+            G, C, R, P = DRAGONFLY_CONFIGS[n]
+            f.write(f"dragonfly {G} {C} {R} {P}\n")
+    return path
+
+
 def generate(topo_name, n, do_plot=False):
     if topo_name not in GENERATORS:
         print(f"Error: unknown topology '{topo_name}'. "
@@ -445,6 +476,7 @@ def generate(topo_name, n, do_plot=False):
     outdir = os.path.join(TOPO_DIR, topo_name)
     os.makedirs(outdir, exist_ok=True)
     xml_path = GENERATORS[topo_name](n, outdir)
+    write_topo_cfg(topo_name, n, outdir)
 
     if do_plot:
         plot_script = os.path.join(SCRIPT_DIR, "plot_topology.py")

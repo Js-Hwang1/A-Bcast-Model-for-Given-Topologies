@@ -123,6 +123,11 @@ choose_chunks() {
     local nc=$(( msg / 16384 )); (( nc < 4 )) && nc=4; echo "$nc"
 }
 
+topo_cfg_path() {
+    local topo=$1 n=$2
+    echo "$TOPO_DIR/$topo/topo_${n}.cfg"
+}
+
 # ---- Build runner if needed ----
 if [[ ! -x "$BINARY" ]]; then
     echo "Building runner..."
@@ -176,6 +181,9 @@ for TOPO in "${TOPOS[@]}"; do
                     fi
 
                     CMD+=" $BINARY $ALGO $MSG $NC $ROOT $OUTJSON"
+                    if [[ "$ALGO" == "test" ]]; then
+                        CMD+=" $(topo_cfg_path "$TOPO" "$N")"
+                    fi
 
                     echo "$CMD" >> "$JOBFILE"
                     NJOBS=$((NJOBS + 1))
