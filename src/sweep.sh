@@ -39,7 +39,7 @@ HOST_SPEED="2000Gf"
 # ---- Default parameter space ----
 TOPOS=(2Dmesh Butterfly Dragonfly FatTree)
 SIZES=(128 256 512 1024)
-ALGOS=(mpi srda)
+ALGOS=(mpi srda pipe bine glf)
 MSG_SIZES=(256 1024 4096 16384 65536 262144 1048576 4194304 16777216 67108864)
 
 # ---- Defaults ----
@@ -128,6 +128,20 @@ topo_cfg_path() {
     echo "$TOPO_DIR/$topo/topo_${n}.cfg"
 }
 
+topo_data_path() {
+    local topo=$1 n=$2
+    local xml
+    xml=$(platform_path "$topo" "$n")
+    echo "${xml%.xml}.tdat"
+}
+
+spec_data_path() {
+    local topo=$1 n=$2
+    local xml
+    xml=$(platform_path "$topo" "$n")
+    echo "${xml%.xml}.sdat"
+}
+
 # ---- Build runner if needed ----
 if [[ ! -x "$BINARY" ]]; then
     echo "Building runner..."
@@ -137,6 +151,46 @@ if [[ ! -x "$BINARY" ]]; then
     else
         make -C "$SCRIPT_DIR" -s
     fi
+fi
+
+# ---- Preprocess XML -> .tdat for test algorithm ----
+needs_tdat=0
+for _algo in "${ALGOS[@]}"; do
+    [[ "$_algo" == "test" ]] && needs_tdat=1
+done
+if [[ $needs_tdat -eq 1 ]]; then
+    PREPROCESS="$SCRIPT_DIR/topo_preprocess.py"
+    for _topo in "${TOPOS[@]}"; do
+        for _n in "${SIZES[@]}"; do
+            _xml=$(platform_path "$_topo" "$_n")
+            _tdat=$(topo_data_path "$_topo" "$_n")
+            [[ ! -f "$_xml" ]] && continue
+            if [[ ! -f "$_tdat" || "$_xml" -nt "$_tdat" ]]; then
+                echo "Preprocessing: $_xml -> $_tdat"
+                python3 "$PREPROCESS" "$_xml" "$_tdat"
+            fi
+        done
+    done
+fi
+
+# ---- Preprocess XML -> .sdat for spec algorithm ----
+needs_sdat=0
+for _algo in "${ALGOS[@]}"; do
+    [[ "$_algo" == "spec" ]] && needs_sdat=1
+done
+if [[ $needs_sdat -eq 1 ]]; then
+    SPEC_PREPROCESS="$SCRIPT_DIR/spectral_preprocess.py"
+    for _topo in "${TOPOS[@]}"; do
+        for _n in "${SIZES[@]}"; do
+            _xml=$(platform_path "$_topo" "$_n")
+            _sdat=$(spec_data_path "$_topo" "$_n")
+            [[ ! -f "$_xml" ]] && continue
+            if [[ ! -f "$_sdat" || "$_xml" -nt "$_sdat" ]]; then
+                echo "Preprocessing (spectral): $_xml -> $_sdat"
+                python3 "$SPEC_PREPROCESS" "$_xml" "$_sdat"
+            fi
+        done
+    done
 fi
 
 # ---- Enumerate all jobs ----
@@ -153,15 +207,14 @@ for TOPO in "${TOPOS[@]}"; do
         # Skip if topology files missing
         [[ ! -f "$PLATFORM" || ! -f "$HOSTFILE" ]] && continue
 
-        # Get root range for this N
-        ROOTS=$(root_range "$N")
-
         for ALGO in "${ALGOS[@]}"; do
             for MSG in "${MSG_SIZES[@]}"; do
-                for ROOT in $ROOTS; do
-                    NC=$(choose_chunks "$MSG")
+                NC=$(choose_chunks "$MSG")
 
-                    OUTJSON="$DATA_DIR/$TOPO/$ALGO/N${N}_MSG${MSG}_R${ROOT}.json"
+                if [[ "$ROOT_MODE" == "all" ]]; then
+                    # Bulk mode: single smpirun with root=all
+                    # Avoids per-root MPI_Init overhead (128x fewer launches)
+                    OUTJSON="$DATA_DIR/$TOPO/$ALGO/N${N}_MSG${MSG}.json"
                     OUTDIR=$(dirname "$OUTJSON")
 
                     CMD="mkdir -p $OUTDIR"
@@ -171,23 +224,53 @@ for TOPO in "${TOPOS[@]}"; do
                     CMD+=" --cfg=smpi/host-speed:$HOST_SPEED"
                     CMD+=" --cfg=smpi/display-timing:yes"
                     CMD+=" --log=root.thres:warning"
-
-                    if [[ "${TRACE:-}" == "1" ]]; then
-                        TRACEFILE="${OUTJSON%.json}.trace"
-                        CMD+=" -trace"
-                        CMD+=" --cfg=tracing/filename:$TRACEFILE"
-                        CMD+=" --cfg=tracing/smpi:yes"
-                        CMD+=" --cfg=tracing/smpi/internals:yes"
-                    fi
-
-                    CMD+=" $BINARY $ALGO $MSG $NC $ROOT $OUTJSON"
+                    CMD+=" $BINARY $ALGO $MSG $NC all $OUTJSON"
                     if [[ "$ALGO" == "test" ]]; then
+                        CMD+=" $(topo_data_path "$TOPO" "$N")"
+                    elif [[ "$ALGO" == "glf" ]]; then
                         CMD+=" $(topo_cfg_path "$TOPO" "$N")"
+                    elif [[ "$ALGO" == "spec" ]]; then
+                        CMD+=" $(spec_data_path "$TOPO" "$N")"
                     fi
 
                     echo "$CMD" >> "$JOBFILE"
                     NJOBS=$((NJOBS + 1))
-                done
+                else
+                    # Per-root mode: one smpirun per root value
+                    ROOTS=$(root_range "$N")
+                    for ROOT in $ROOTS; do
+                        OUTJSON="$DATA_DIR/$TOPO/$ALGO/N${N}_MSG${MSG}_R${ROOT}.json"
+                        OUTDIR=$(dirname "$OUTJSON")
+
+                        CMD="mkdir -p $OUTDIR"
+                        CMD+=" && $SMPI_PREFIX smpirun -np $N"
+                        CMD+=" -platform $PLATFORM"
+                        CMD+=" -hostfile $HOSTFILE"
+                        CMD+=" --cfg=smpi/host-speed:$HOST_SPEED"
+                        CMD+=" --cfg=smpi/display-timing:yes"
+                        CMD+=" --log=root.thres:warning"
+
+                        if [[ "${TRACE:-}" == "1" ]]; then
+                            TRACEFILE="${OUTJSON%.json}.trace"
+                            CMD+=" -trace"
+                            CMD+=" --cfg=tracing/filename:$TRACEFILE"
+                            CMD+=" --cfg=tracing/smpi:yes"
+                            CMD+=" --cfg=tracing/smpi/internals:yes"
+                        fi
+
+                        CMD+=" $BINARY $ALGO $MSG $NC $ROOT $OUTJSON"
+                        if [[ "$ALGO" == "test" ]]; then
+                            CMD+=" $(topo_data_path "$TOPO" "$N")"
+                        elif [[ "$ALGO" == "glf" ]]; then
+                            CMD+=" $(topo_cfg_path "$TOPO" "$N")"
+                        elif [[ "$ALGO" == "spec" ]]; then
+                            CMD+=" $(spec_data_path "$TOPO" "$N")"
+                        fi
+
+                        echo "$CMD" >> "$JOBFILE"
+                        NJOBS=$((NJOBS + 1))
+                    done
+                fi
             done
         done
     done
