@@ -5,7 +5,6 @@ Generate publication-quality broadcast latency plots.
 One figure per (topology, N) pair.
   x-axis : message size  (bytes, log-scale)
   y-axis : mean broadcast time  (seconds, log-scale)
-  error  : mean ± 1 σ  (capped error bars)
 
 Usage:
     python3 src/plot_results.py              # saves PDFs into figs/
@@ -107,21 +106,23 @@ def load_data(topology, algorithm, N):
     if not d.is_dir():
         return None, None, None
 
-    msgs, means, stds = [], [], []
+    msgs, means = [], []
     for f in sorted(d.glob(f"N{N}_MSG*.json")):
+        if "_R" in f.stem.split("MSG")[1]:
+            continue  # skip per-root files
         with open(f) as fh:
             rec = json.load(fh)
+        if rec["msg_bytes"] < 16384:
+            continue  # skip small messages (too noisy)
         msgs.append(rec["msg_bytes"])
         means.append(rec["mean_sec"])
-        stds.append(rec["stdev_sec"])
 
     if not msgs:
-        return None, None, None
+        return None, None
 
     order = np.argsort(msgs)
     return (np.array(msgs)[order],
-            np.array(means)[order],
-            np.array(stds)[order])
+            np.array(means)[order])
 
 
 # ──────────────────────── plotting ─────────────────────────────────
@@ -133,22 +134,16 @@ def plot_topology(topology, N, show=False):
     all_msgs = set()
     for algo in ALGORITHMS:
         label, color, marker, ls, ecolor = ALGO_STYLE[algo]
-        msg, mu, sigma = load_data(topology, algo, N)
+        msg, mu = load_data(topology, algo, N)
         if msg is None:
             continue
         any_data = True
         all_msgs.update(msg.tolist())
 
-        # Asymmetric error bars: clamp lower bar so it stays positive
-        err_lo = np.minimum(sigma, mu * 0.8)   # don't cross zero
-        err_hi = sigma
-
-        ax.errorbar(msg, mu, yerr=[err_lo, err_hi],
-                     fmt=ls, color=color, ecolor=ecolor,
-                     marker=marker, markersize=4.5, markeredgecolor=ecolor,
-                     markeredgewidth=0.5, linewidth=1.3,
-                     capsize=2.5, capthick=0.7, elinewidth=0.7,
-                     label=label, zorder=3)
+        ax.plot(msg, mu, ls, color=color,
+                marker=marker, markersize=4.5, markeredgecolor=ecolor,
+                markeredgewidth=0.5, linewidth=1.3,
+                label=label, zorder=3)
 
     if not any_data:
         plt.close(fig)
@@ -171,7 +166,7 @@ def plot_topology(topology, N, show=False):
     plt.setp(ax.get_yticklabels(), fontsize=7)
 
     ax.set_xlabel("Message size", fontsize=9, labelpad=4)
-    ax.set_ylabel("Broadcast time (mean \u00b1 1\u03c3)", fontsize=9,
+    ax.set_ylabel("Broadcast time (mean)", fontsize=9,
                   labelpad=4)
 
     topo_label = TOPOLOGY_LABEL.get(topology, topology)
@@ -226,6 +221,8 @@ def main():
             d = DATA / topo / algo
             if d.is_dir():
                 for f in d.glob("N*_MSG*.json"):
+                    if "_R" in f.stem.split("MSG")[1]:
+                        continue
                     n_values.add(int(f.stem.split("_")[0][1:]))
 
     print(f"Topologies : {topologies}")

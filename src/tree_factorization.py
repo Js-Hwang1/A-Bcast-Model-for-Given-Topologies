@@ -2,7 +2,7 @@ import cvxpy as cp
 import numpy as np
 import networkx as nx
 from networkx.algorithms import bipartite
-from networkx.generators import fast_gnp_random_graph
+import matplotlib.pyplot as plt
 
 def solve_O(A, E):
     """
@@ -78,10 +78,10 @@ n1 = 15
 n2 = 15
 p = 0.9
 
-G = bipartite.random_graph(n1, n2, p, seed=seed)
-
-n = 128
-G = fast_gnp_random_graph(n, 0.05)
+N = 10  # N x N mesh
+G = nx.grid_2d_graph(N, N)
+G = nx.convert_node_labels_to_integers(G)
+n = N * N
 E = nx.to_numpy_array(G, dtype=float)
 
 '''a = 0.8
@@ -546,3 +546,54 @@ print_matrix_stats(O_s)
 nonzero = np.abs(O_s) > eps
 stats_nonzero = O_s[nonzero]
 print_matrix_stats(stats_nonzero)
+
+
+def plot_trees(T_list, p_list, G_base, N, root=0):
+    """
+    Plot K trees in a 2x4 grid. Each subplot shows one spanning tree
+    laid out on the NxN grid positions.
+    """
+    K = len(T_list)
+    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+    axes = axes.flatten()
+
+    # Grid positions: node i -> (col, row) so it looks like a grid
+    pos = {i: (i % N, N - 1 - i // N) for i in range(N * N)}
+
+    for k in range(min(K, 8)):
+        ax = axes[k]
+        T = T_list[k]
+
+        # Build a directed graph from the tree adjacency matrix
+        T_graph = nx.DiGraph()
+        T_graph.add_nodes_from(range(T.shape[0]))
+        for i in range(T.shape[0]):
+            for j in range(T.shape[1]):
+                if T[i, j] == 1:
+                    T_graph.add_edge(i, j)
+
+        # Draw edges
+        nx.draw_networkx_edges(T_graph, pos, ax=ax, edge_color='black',
+                               arrows=True, arrowsize=8, width=1.5, alpha=0.9,
+                               arrowstyle='->', min_source_margin=3, min_target_margin=3)
+
+        # Draw nodes
+        node_colors = ['red' if i == root else 'skyblue' for i in range(T.shape[0])]
+        nx.draw_networkx_nodes(T_graph, pos, ax=ax, node_size=30,
+                               node_color=node_colors, edgecolors='black', linewidths=0.5)
+
+        ax.set_title(f"Tree {k+1}  (p={p_list[k]:.4f})", fontsize=11)
+        ax.set_aspect('equal')
+        ax.axis('off')
+
+    # Hide unused subplots if K < 8
+    for k in range(K, 8):
+        axes[k].axis('off')
+
+    fig.suptitle(f"Tree Factorization: {K} Spanning Trees on {N}x{N} Grid", fontsize=14)
+    plt.tight_layout()
+    plt.savefig("tree_factorization.png", dpi=150, bbox_inches='tight')
+    plt.show()
+
+
+plot_trees(trees, p, G, N, root=root)
