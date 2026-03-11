@@ -39,7 +39,7 @@ HOST_SPEED="2000Gf"
 # ---- Default parameter space ----
 TOPOS=(2Dmesh Butterfly Dragonfly FatTree)
 SIZES=(128 256 512 1024)
-ALGOS=(mpi srda pipe bine glf)
+ALGOS=(mpi srda pipe bine glf ffgb)
 MSG_SIZES=(256 1024 4096 16384 65536 262144 1048576 4194304 16777216 67108864)
 
 # ---- Defaults ----
@@ -135,13 +135,6 @@ topo_data_path() {
     echo "${xml%.xml}.tdat"
 }
 
-spec_data_path() {
-    local topo=$1 n=$2
-    local xml
-    xml=$(platform_path "$topo" "$n")
-    echo "${xml%.xml}.sdat"
-}
-
 # ---- Build runner if needed ----
 if [[ ! -x "$BINARY" ]]; then
     echo "Building runner..."
@@ -156,7 +149,7 @@ fi
 # ---- Preprocess XML -> .tdat for test algorithm ----
 needs_tdat=0
 for _algo in "${ALGOS[@]}"; do
-    [[ "$_algo" == "test" ]] && needs_tdat=1
+    [[ "$_algo" == "test" || "$_algo" == "ffgb" ]] && needs_tdat=1
 done
 if [[ $needs_tdat -eq 1 ]]; then
     PREPROCESS="$SCRIPT_DIR/topo_preprocess.py"
@@ -168,26 +161,6 @@ if [[ $needs_tdat -eq 1 ]]; then
             if [[ ! -f "$_tdat" || "$_xml" -nt "$_tdat" ]]; then
                 echo "Preprocessing: $_xml -> $_tdat"
                 python3 "$PREPROCESS" "$_xml" "$_tdat"
-            fi
-        done
-    done
-fi
-
-# ---- Preprocess XML -> .sdat for spec algorithm ----
-needs_sdat=0
-for _algo in "${ALGOS[@]}"; do
-    [[ "$_algo" == "spec" ]] && needs_sdat=1
-done
-if [[ $needs_sdat -eq 1 ]]; then
-    SPEC_PREPROCESS="$SCRIPT_DIR/spectral_preprocess.py"
-    for _topo in "${TOPOS[@]}"; do
-        for _n in "${SIZES[@]}"; do
-            _xml=$(platform_path "$_topo" "$_n")
-            _sdat=$(spec_data_path "$_topo" "$_n")
-            [[ ! -f "$_xml" ]] && continue
-            if [[ ! -f "$_sdat" || "$_xml" -nt "$_sdat" ]]; then
-                echo "Preprocessing (spectral): $_xml -> $_sdat"
-                python3 "$SPEC_PREPROCESS" "$_xml" "$_sdat"
             fi
         done
     done
@@ -225,12 +198,10 @@ for TOPO in "${TOPOS[@]}"; do
                     CMD+=" --cfg=smpi/display-timing:yes"
                     CMD+=" --log=root.thres:warning"
                     CMD+=" $BINARY $ALGO $MSG $NC all $OUTJSON"
-                    if [[ "$ALGO" == "test" ]]; then
+                    if [[ "$ALGO" == "test" || "$ALGO" == "ffgb" ]]; then
                         CMD+=" $(topo_data_path "$TOPO" "$N")"
                     elif [[ "$ALGO" == "glf" ]]; then
                         CMD+=" $(topo_cfg_path "$TOPO" "$N")"
-                    elif [[ "$ALGO" == "spec" ]]; then
-                        CMD+=" $(spec_data_path "$TOPO" "$N")"
                     fi
 
                     echo "$CMD" >> "$JOBFILE"
@@ -263,8 +234,6 @@ for TOPO in "${TOPOS[@]}"; do
                             CMD+=" $(topo_data_path "$TOPO" "$N")"
                         elif [[ "$ALGO" == "glf" ]]; then
                             CMD+=" $(topo_cfg_path "$TOPO" "$N")"
-                        elif [[ "$ALGO" == "spec" ]]; then
-                            CMD+=" $(spec_data_path "$TOPO" "$N")"
                         fi
 
                         echo "$CMD" >> "$JOBFILE"

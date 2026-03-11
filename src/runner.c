@@ -24,7 +24,6 @@
  *   "glf"  — Global-Links-First (Dorier et al., COMHPC 2016).
  *             Hierarchical: multi-level binomial cascade.
  *             Flat: BFS-proximity binomial.
- *   "bbs"  — (stub) Planned frame-based broadcast; not yet implemented.
  *
  * Usage:
  *   smpirun -np N -platform <xml> -hostfile <hf> \
@@ -58,52 +57,6 @@ static double run_mpi_bcast(void *buf, int count, int root)
     double t0 = MPI_Wtime();
     MPI_Bcast(buf, count, MPI_BYTE, root, MPI_COMM_WORLD);
     double t1 = MPI_Wtime();
-    return t1 - t0;
-}
-
-/* ================================================================
- * Raw binary tree broadcast using Recv/Isend/Waitall.
- * Exact same logic as MPI_Bcast's binary tree but using atomic ops.
- * Binary tree: vrank's children are 2*vrank+1 and 2*vrank+2.
- * ================================================================ */
-static double run_rawbino(void *buf, int count, int rank, int size,
-                          int root)
-{
-    int vrank = (rank - root + size) % size;
-
-    /* Binary tree: parent = (vrank-1)/2, children = 2*vrank+1, 2*vrank+2 */
-    int parent_rank = -1;
-    if (vrank != 0)
-        parent_rank = ((vrank - 1) / 2 + root) % size;
-
-    int nchildren = 0;
-    int children_ranks[2];
-    int left  = 2 * vrank + 1;
-    int right = 2 * vrank + 2;
-    if (left < size)
-        children_ranks[nchildren++] = (left + root) % size;
-    if (right < size)
-        children_ranks[nchildren++] = (right + root) % size;
-
-    MPI_Request *reqs = nchildren > 0
-        ? malloc(nchildren * sizeof(MPI_Request)) : NULL;
-
-    MPI_Barrier(MPI_COMM_WORLD);
-    double t0 = MPI_Wtime();
-
-    if (vrank != 0)
-        MPI_Recv(buf, count, MPI_BYTE, parent_rank, 0,
-                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-    for (int ch = 0; ch < nchildren; ch++)
-        MPI_Isend(buf, count, MPI_BYTE, children_ranks[ch], 0,
-                  MPI_COMM_WORLD, &reqs[ch]);
-
-    if (nchildren > 0)
-        MPI_Waitall(nchildren, reqs, MPI_STATUSES_IGNORE);
-
-    double t1 = MPI_Wtime();
-    free(reqs);
     return t1 - t0;
 }
 
@@ -1150,6 +1103,228 @@ static double run_glf(void *buf, int count, int rank, int size,
 }
 
 /* ================================================================
+ * Algorithm 6: FFGB — Furthest-First Greedy Broadcast
+ *
+ * Discrete timestep simulation (rank 0 only):
+ *   Each step, every informed node sends to the furthest unclaimed
+ *   uninformed node (by pairwise latency from .tdat).  Senders are
+ *   processed in (recv_step ASC, node_id ASC) order; once a target
+ *   is claimed in a step, no other sender can pick it.
+ *
+ * Output: parent[] + child_seq[] arrays, broadcast to all ranks.
+ * Execution: simple tree recv-then-Isend, no chunking.
+ *
+ * Complexity: O(N^2 log N) — fine for N <= 1024.
+ * ================================================================ */
+
+static double run_ffgb(void *buf, int count, int rank, int size,
+                       int root, const char *topo_file)
+{
+    /* ---- Load topology data (same struct as run_test) ---- */
+    typedef struct {
+        int      N;
+        double   bw_min, lat_base;
+        float    *lat;
+        uint16_t *flink;
+        int      num_ev;
+        double   *eigenvalues, *eigvecs;
+    } td_t;
+
+    td_t td;
+    {
+        FILE *fp = fopen(topo_file, "rb");
+        if (!fp) {
+            if (rank == 0)
+                fprintf(stderr, "Error: cannot open topo data: %s\n",
+                        topo_file);
+            return -1.0;
+        }
+        char magic[4];
+        uint32_t version, n, num_links;
+        if (fread(magic, 1, 4, fp) != 4 || memcmp(magic, "TDAT", 4) != 0)
+            { fclose(fp); return -1.0; }
+        if (fread(&version, 4, 1, fp) != 1 || (version != 1 && version != 2))
+            { fclose(fp); return -1.0; }
+        if (fread(&n, 4, 1, fp) != 1) { fclose(fp); return -1.0; }
+        if (fread(&num_links, 4, 1, fp) != 1) { fclose(fp); return -1.0; }
+        if (fread(&td.bw_min, 8, 1, fp) != 1) { fclose(fp); return -1.0; }
+        if (fread(&td.lat_base, 8, 1, fp) != 1) { fclose(fp); return -1.0; }
+
+        td.N = (int)n;
+        size_t nn = (size_t)n * n;
+        td.lat   = malloc(nn * sizeof(float));
+        td.flink = malloc(nn * sizeof(uint16_t));
+        if (fread(td.lat, sizeof(float), nn, fp) != nn)
+            { free(td.lat); free(td.flink); fclose(fp); return -1.0; }
+        if (fread(td.flink, sizeof(uint16_t), nn, fp) != nn)
+            { free(td.lat); free(td.flink); fclose(fp); return -1.0; }
+        td.num_ev = 0; td.eigenvalues = NULL; td.eigvecs = NULL;
+        /* skip spectral data — not needed */
+        fclose(fp);
+    }
+
+    if (td.N != size) {
+        if (rank == 0)
+            fprintf(stderr,
+                "Error: .tdat has %d nodes but MPI size is %d\n",
+                td.N, size);
+        free(td.lat); free(td.flink);
+        return -1.0;
+    }
+
+    int N = size;
+    int *parent    = malloc(N * sizeof(int));
+    int *child_seq = malloc(N * sizeof(int));
+
+    /* ---- Build plan on rank 0 ---- */
+    if (rank == 0) {
+        int *recv_step   = malloc(N * sizeof(int));
+        int *child_count = calloc(N, sizeof(int));
+        char *informed   = calloc(N, 1);
+
+        for (int i = 0; i < N; i++) {
+            parent[i]    = -1;
+            child_seq[i] = 0;
+            recv_step[i] = -1;
+        }
+
+        informed[root]   = 1;
+        recv_step[root]  = 0;
+        int n_informed   = 1;
+        int step         = 0;
+
+        /* Sender ordering buffer: (recv_step, node_id) — sorted */
+        int *senders = malloc(N * sizeof(int));
+
+        while (n_informed < N) {
+            step++;
+
+            /* Collect informed nodes, sort by (recv_step ASC, id ASC) */
+            int nsend = 0;
+            for (int i = 0; i < N; i++)
+                if (informed[i]) senders[nsend++] = i;
+
+            /* Insertion sort by (recv_step, id) — both ascending */
+            for (int i = 1; i < nsend; i++) {
+                int key = senders[i];
+                int key_rs = recv_step[key];
+                int j = i - 1;
+                while (j >= 0 &&
+                       (recv_step[senders[j]] > key_rs ||
+                        (recv_step[senders[j]] == key_rs &&
+                         senders[j] > key))) {
+                    senders[j + 1] = senders[j];
+                    j--;
+                }
+                senders[j + 1] = key;
+            }
+
+            /* Each sender picks furthest unclaimed uninformed node */
+            char *claimed = calloc(N, 1);
+            int n_claimed = 0;
+
+            for (int si = 0; si < nsend; si++) {
+                int s = senders[si];
+                /* Find argmax lat[s*N + j] over uninformed unclaimed j */
+                int best_j = -1;
+                float best_lat = -1.0f;
+                for (int j = 0; j < N; j++) {
+                    if (informed[j] || claimed[j]) continue;
+                    float l = td.lat[(size_t)s * N + j];
+                    if (l > best_lat) {
+                        best_lat = l;
+                        best_j = j;
+                    }
+                }
+                if (best_j >= 0) {
+                    parent[best_j]    = s;
+                    child_seq[best_j] = child_count[s]++;
+                    recv_step[best_j] = step;
+                    claimed[best_j]   = 1;
+                    n_claimed++;
+                }
+            }
+
+            /* Mark all claimed nodes as informed */
+            for (int j = 0; j < N; j++)
+                if (claimed[j]) informed[j] = 1;
+            n_informed += n_claimed;
+
+            free(claimed);
+
+            if (n_claimed == 0) break;  /* safety: shouldn't happen */
+        }
+
+        free(senders);
+        free(recv_step);
+        free(child_count);
+        free(informed);
+    }
+
+    /* ---- Broadcast plan to all ranks ---- */
+    MPI_Bcast(parent,    N, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(child_seq, N, MPI_INT, 0, MPI_COMM_WORLD);
+
+    /* ---- Derive children list for this rank ----
+     * Scan parent[] for nodes whose parent is this rank,
+     * sorted by child_seq[]. */
+    int nchildren = 0;
+    for (int i = 0; i < N; i++)
+        if (parent[i] == rank) nchildren++;
+
+    int *children = NULL;
+    if (nchildren > 0) {
+        children = malloc(nchildren * sizeof(int));
+        int idx = 0;
+        for (int i = 0; i < N; i++)
+            if (parent[i] == rank)
+                children[idx++] = i;
+        /* Sort by child_seq */
+        for (int i = 1; i < nchildren; i++) {
+            int key = children[i];
+            int key_seq = child_seq[key];
+            int j = i - 1;
+            while (j >= 0 && child_seq[children[j]] > key_seq) {
+                children[j + 1] = children[j];
+                j--;
+            }
+            children[j + 1] = key;
+        }
+    }
+
+    /* ---- Execute broadcast ---- */
+    MPI_Request *reqs = nchildren > 0
+        ? malloc(nchildren * sizeof(MPI_Request)) : NULL;
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    double t0 = MPI_Wtime();
+
+    /* Recv from parent */
+    if (rank != root)
+        MPI_Recv(buf, count, MPI_BYTE, parent[rank], 0,
+                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    /* Isend to children in pre-computed order */
+    for (int ch = 0; ch < nchildren; ch++)
+        MPI_Isend(buf, count, MPI_BYTE, children[ch], 0,
+                  MPI_COMM_WORLD, &reqs[ch]);
+
+    if (nchildren > 0)
+        MPI_Waitall(nchildren, reqs, MPI_STATUSES_IGNORE);
+
+    double t1 = MPI_Wtime();
+
+    free(reqs);
+    free(children);
+    free(parent);
+    free(child_seq);
+    free(td.lat);
+    free(td.flink);
+
+    return t1 - t0;
+}
+
+/* ================================================================
  * Data-driven topology structures (replaces topo_cfg_t for run_test)
  *
  * Loaded from .tdat files produced by topo_preprocess.py.
@@ -1490,6 +1665,134 @@ static void build_onehop_bfs(const topo_data_t *td, int root,
     free(ambassadors); free(comp_order); free(comp_dist);
 }
 
+/* Farthest-Point-First (FPF) Dispersion Tree.
+ *
+ * Gonzalez (1985) k-center greedy heuristic applied to broadcast tree
+ * construction:  at each step, the node farthest from the current
+ * informed set is added, with its parent chosen as the nearest
+ * available informed node (contention-aware tie-breaking via flink).
+ *
+ * This maximizes spatial dispersion of informed nodes at each tree
+ * level — the first ~K steps place ambassadors across distinct
+ * topology groups, then remaining steps fill locally.
+ *
+ * O(N²) time, rank 0 only.
+ *
+ * max_fanout = 0 → unlimited.
+ */
+static void build_fpf_tree(const topo_data_t *td, int root,
+                            int size, int *parent, int max_fanout)
+{
+    int N = td->N;
+    int cap = (max_fanout > 0) ? max_fanout : size;
+
+    /* State arrays */
+    char *informed = calloc(size, 1);
+    float *min_dist = malloc(size * sizeof(float));
+    int *fanout = calloc(size, sizeof(int));
+    /* Per-parent flink values of assigned children:
+     * child_fl[u * size + i] = flink from u to its i-th child. */
+    uint16_t *child_fl = malloc((size_t)size * size * sizeof(uint16_t));
+
+    /* Initialize: root is informed */
+    for (int j = 0; j < size; j++) {
+        parent[j] = -1;
+        min_dist[j] = td->lat[(size_t)root * N + j];
+    }
+    informed[root] = 1;
+    min_dist[root] = 0.0f;
+
+    /* Greedy loop: add N-1 nodes */
+    for (int step = 0; step < size - 1; step++) {
+        /* 1. Find target = argmax min_dist among uninformed */
+        int target = -1;
+        float best_dist = -1.0f;
+        for (int j = 0; j < size; j++) {
+            if (informed[j]) continue;
+            if (min_dist[j] > best_dist) {
+                best_dist = min_dist[j];
+                target = j;
+            }
+        }
+        if (target < 0) break;  /* all informed (shouldn't happen) */
+
+        /* 2. Parent selection: nearest eligible informed node,
+         *    with contention-aware flink tie-breaking.
+         *
+         *    a) Find nearest latency among eligible (under fanout cap)
+         *    b) 10% threshold catches quantized ties
+         *    c) Among candidates within threshold, pick least flink
+         *       overlap with existing children
+         *    d) Break remaining ties by lowest latency */
+
+        /* a) Nearest eligible latency */
+        float nearest_lat = 1e30f;
+        for (int u = 0; u < size; u++) {
+            if (!informed[u] || fanout[u] >= cap) continue;
+            float l = td->lat[(size_t)u * N + target];
+            if (l < nearest_lat) nearest_lat = l;
+        }
+
+        /* b) Threshold */
+        float thresh = nearest_lat * 1.10f;
+
+        /* c-d) Best parent: least overlap, then lowest latency */
+        int best_parent = -1;
+        int best_overlap = size + 1;
+        float best_lat = 1e30f;
+
+        for (int u = 0; u < size; u++) {
+            if (!informed[u] || fanout[u] >= cap) continue;
+            float l = td->lat[(size_t)u * N + target];
+            if (l > thresh) continue;
+
+            /* Count flink overlap with u's existing children */
+            uint16_t fl = td->flink[(size_t)u * N + target];
+            int overlap = 0;
+            for (int ci = 0; ci < fanout[u]; ci++) {
+                if (child_fl[(size_t)u * size + ci] == fl)
+                    overlap++;
+            }
+
+            if (overlap < best_overlap ||
+                (overlap == best_overlap && l < best_lat)) {
+                best_overlap = overlap;
+                best_lat = l;
+                best_parent = u;
+            }
+        }
+
+        /* Fallback: all at cap — pick nearest informed, ignore cap */
+        if (best_parent < 0) {
+            float bl = 1e30f;
+            for (int u = 0; u < size; u++) {
+                if (!informed[u]) continue;
+                float l = td->lat[(size_t)u * N + target];
+                if (l < bl) { bl = l; best_parent = u; }
+            }
+        }
+
+        /* Assign target to best_parent */
+        parent[target] = best_parent;
+        child_fl[(size_t)best_parent * size + fanout[best_parent]] =
+            td->flink[(size_t)best_parent * N + target];
+        fanout[best_parent]++;
+        informed[target] = 1;
+
+        /* 3. Update coverage: min_dist to nearest informed node */
+        for (int j = 0; j < size; j++) {
+            if (informed[j]) continue;
+            float d = td->lat[(size_t)target * N + j];
+            if (d < min_dist[j]) min_dist[j] = d;
+        }
+    }
+
+    free(child_fl);
+    free(fanout);
+    free(min_dist);
+    free(informed);
+}
+
 /* Estimate pipelined broadcast time for a given tree.
  *
  * Returns (optimal_K, estimated_time) for the tree defined by parent[].
@@ -1616,6 +1919,22 @@ static void build_spectral_tree(const topo_data_t *td, int root, int size,
         int nf = sizeof(fanouts) / sizeof(fanouts[0]);
         for (int fi = 0; fi < nf; fi++) {
             build_onehop_bfs(td, root, size, tmp, fanouts[fi]);
+            int K;
+            double T = _estimate_time(td, size, tmp, count, &K);
+            if (T < best_T) {
+                best_T = T;
+                *out_K = K;
+                memcpy(parent, tmp, size * sizeof(int));
+            }
+        }
+    }
+
+    /* FPF dispersion tree with multiple fanout caps */
+    {
+        static const int fpf_fanouts[] = {0, 2, 4, 8};
+        int nf = sizeof(fpf_fanouts) / sizeof(fpf_fanouts[0]);
+        for (int fi = 0; fi < nf; fi++) {
+            build_fpf_tree(td, root, size, tmp, fpf_fanouts[fi]);
             int K;
             double T = _estimate_time(td, size, tmp, count, &K);
             if (T < best_T) {
@@ -1779,900 +2098,6 @@ static double run_test(void *buf, int count, int rank, int size,
 }
 
 /* ================================================================
- * Spectral broadcast data structures (for run_spec)
- *
- * Loaded from .sdat files produced by spectral_preprocess.py.
- * Contains sparse-Laplacian eigenvectors projected to compute nodes
- * and pairwise latency matrix for bridge selection.
- * ================================================================ */
-
-typedef struct {
-    int      N;           /* number of compute nodes                */
-    double   bw_min;      /* min bottleneck bandwidth (bytes/sec)   */
-    int      num_ev;      /* number of eigenvectors                 */
-    double   *eigenvalues; /* num_ev eigenvalues (lambda_2..k+1)    */
-    double   *eigvecs;    /* num_ev * N eigenvector matrix          */
-    int      has_lat;     /* 1 if lat matrix is present             */
-    float    *lat;        /* N*N pairwise latency matrix (seconds)  */
-} spec_data_t;
-
-static int spec_data_load(const char *path, spec_data_t *sd)
-{
-    FILE *fp = fopen(path, "rb");
-    if (!fp) return -1;
-
-    char magic[4];
-    uint32_t version, n, nev;
-
-    if (fread(magic, 1, 4, fp) != 4 || memcmp(magic, "SDAT", 4) != 0)
-        { fclose(fp); return -1; }
-    if (fread(&version, 4, 1, fp) != 1 || (version != 1 && version != 2))
-        { fclose(fp); return -1; }
-    if (fread(&n, 4, 1, fp) != 1)
-        { fclose(fp); return -1; }
-    if (fread(&nev, 4, 1, fp) != 1)
-        { fclose(fp); return -1; }
-    if (fread(&sd->bw_min, 8, 1, fp) != 1)
-        { fclose(fp); return -1; }
-
-    sd->N = (int)n;
-    sd->num_ev = (int)nev;
-
-    /* Eigenvalues */
-    sd->eigenvalues = malloc(nev * sizeof(double));
-    if (fread(sd->eigenvalues, sizeof(double), nev, fp) != nev)
-        { free(sd->eigenvalues); fclose(fp); return -1; }
-
-    /* Eigenvectors: num_ev * N doubles, row-major */
-    size_t ev_size = (size_t)nev * n;
-    sd->eigvecs = malloc(ev_size * sizeof(double));
-    if (fread(sd->eigvecs, sizeof(double), ev_size, fp) != ev_size)
-        { free(sd->eigenvalues); free(sd->eigvecs);
-          fclose(fp); return -1; }
-
-    /* Latency matrix: N*N floats */
-    size_t nn = (size_t)n * n;
-    sd->lat = malloc(nn * sizeof(float));
-    if (fread(sd->lat, sizeof(float), nn, fp) != nn) {
-        /* lat_matrix is optional — old files might not have it */
-        free(sd->lat);
-        sd->lat = NULL;
-        sd->has_lat = 0;
-    } else {
-        sd->has_lat = 1;
-    }
-
-    fclose(fp);
-    return 0;
-}
-
-static void spec_data_free(spec_data_t *sd)
-{
-    free(sd->eigenvalues);
-    free(sd->eigvecs);
-    free(sd->lat);
-    sd->eigenvalues = NULL;
-    sd->eigvecs     = NULL;
-    sd->lat         = NULL;
-}
-
-/* ================================================================
- * Neighbor-BFS Spanning Tree with Fiedler-Ordered Children
- *
- * BFS over physical neighbors — full physical fanout, no restriction.
- * Every unvisited neighbor becomes a child.
- *
- * Fiedler guidance: children are ordered by |Fiedler(child) - Fiedler(u)|
- * descending (most spectrally distant first).  Since Isend is sequential,
- * the first child starts receiving earliest.  Sending to the spectrally
- * farthest neighbor first ensures distant partitions begin propagating
- * independently while closer partitions are still being served.
- *
- * Result:
- *   - Every edge is a 1-hop physical link
- *   - Fanout = physical degree (natural for the topology)
- *   - Depth = BFS depth of the physical graph
- *   - Fiedler ordering maximises parallel diffusion
- * ================================================================ */
-static void build_spec_bfs_tree(const spec_data_t *sd, int root,
-                                int size, int *parent, int *child_order)
-{
-    for (int i = 0; i < size; i++) { parent[i] = -1; child_order[i] = 0; }
-
-    char *visited = calloc(size, 1);
-    int  *queue   = malloc(size * sizeof(int));
-    int   qh = 0, qt = 0;
-
-    visited[root] = 1;
-    queue[qt++] = root;
-
-    const double *fiedler = sd->eigvecs;
-
-    while (qh < qt) {
-        int u = queue[qh++];
-        double fu = fiedler[u];
-
-        if (!sd->has_lat) continue;
-
-        /* Collect ALL unvisited physical neighbors */
-        int  nbrs[256];
-        double diffs[256];
-        int nn = 0;
-
-        for (int v = 0; v < size; v++) {
-            if (visited[v]) continue;
-            if (sd->lat[(size_t)u * size + v] > 0.0f) {
-                nbrs[nn] = v;
-                diffs[nn] = fabs(fiedler[v] - fu);
-                nn++;
-            }
-        }
-
-        /* Sort by Fiedler difference descending (selection sort) —
-         * most spectrally distant neighbor first */
-        for (int i = 0; i < nn; i++) {
-            int best = i;
-            for (int j = i + 1; j < nn; j++)
-                if (diffs[j] > diffs[best]) best = j;
-            if (best != i) {
-                int tn = nbrs[i]; nbrs[i] = nbrs[best]; nbrs[best] = tn;
-                double td = diffs[i]; diffs[i] = diffs[best]; diffs[best] = td;
-            }
-        }
-
-        /* Adopt all neighbors as children in Fiedler-priority order */
-        for (int i = 0; i < nn; i++) {
-            int child = nbrs[i];
-            parent[child] = u;
-            child_order[child] = i;   /* send priority */
-            visited[child] = 1;
-            queue[qt++] = child;
-        }
-    }
-
-    free(queue);
-    free(visited);
-}
-
-/* ================================================================
- * Algorithm 6: Spectral broadcast (run_spec)
- *
- * Two-phase design that fully isolates file I/O from timing:
- *   Phase 1 — spec_setup(): rank 0 loads .sdat, builds tree,
- *             MPI_Bcast parent[] to all ranks.  Called ONCE before
- *             the root loop.
- *   Phase 2 — run_spec():   pure broadcast, no file I/O.
- *             Only Barrier + Recv/Isend/Waitall is timed.
- * ================================================================ */
-
-/* Pre-loaded spec state, populated by spec_setup() */
-static spec_data_t _spec_sd;
-static int         _spec_loaded = 0;
-
-/* Load .sdat once (rank 0 only), broadcast to all ranks.
- * Returns 0 on success, -1 on error. */
-static int spec_setup(const char *sdat_file, int rank, int size)
-{
-    int ok = 0;
-
-    if (rank == 0) {
-        if (spec_data_load(sdat_file, &_spec_sd) != 0) {
-            fprintf(stderr, "Error: cannot load spec data: %s\n",
-                    sdat_file);
-            ok = -1;
-        } else if (_spec_sd.N != size) {
-            fprintf(stderr,
-                "Error: .sdat has %d nodes but MPI size is %d\n",
-                _spec_sd.N, size);
-            spec_data_free(&_spec_sd);
-            ok = -1;
-        } else if (_spec_sd.num_ev <= 0) {
-            fprintf(stderr, "Error: .sdat has no spectral data\n");
-            spec_data_free(&_spec_sd);
-            ok = -1;
-        }
-    }
-
-    /* Broadcast success/failure to all ranks */
-    MPI_Bcast(&ok, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    if (ok != 0) return -1;
-
-    /* Broadcast the spec data fields from rank 0 to all ranks */
-    if (rank != 0) {
-        _spec_sd.N = size;
-        _spec_sd.num_ev = 0;
-        _spec_sd.eigenvalues = NULL;
-        _spec_sd.eigvecs = NULL;
-        _spec_sd.lat = NULL;
-        _spec_sd.has_lat = 0;
-    }
-
-    MPI_Bcast(&_spec_sd.bw_min, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&_spec_sd.num_ev, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&_spec_sd.has_lat, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-    int nev = _spec_sd.num_ev;
-    if (rank != 0) {
-        _spec_sd.eigenvalues = malloc(nev * sizeof(double));
-        _spec_sd.eigvecs = malloc((size_t)nev * size * sizeof(double));
-    }
-    MPI_Bcast(_spec_sd.eigenvalues, nev, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    MPI_Bcast(_spec_sd.eigvecs, nev * size, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
-    if (_spec_sd.has_lat) {
-        size_t nn = (size_t)size * size;
-        if (rank != 0)
-            _spec_sd.lat = malloc(nn * sizeof(float));
-        MPI_Bcast(_spec_sd.lat, (int)nn, MPI_FLOAT, 0, MPI_COMM_WORLD);
-    }
-
-    _spec_loaded = 1;
-    return 0;
-}
-
-static void spec_cleanup(void)
-{
-    if (_spec_loaded) {
-        spec_data_free(&_spec_sd);
-        _spec_loaded = 0;
-    }
-}
-
-/* Pure broadcast — no file I/O.  Tree is built from pre-loaded
- * _spec_sd, then only the Recv/Isend/Waitall is timed.
- *
- * Pipelined: message is split into nchunks pieces.  For each chunk,
- * blocking Recv from parent, then Isend to ALL children (Fiedler-
- * priority order).  Chunks flow through the tree like a pipeline.
- * With 1-hop edges and high fanout, this gives excellent overlap. */
-static double run_spec(void *buf, int count, int rank, int size,
-                       int root, int nchunks, int *out_nchunks)
-{
-    int *parent = malloc(size * sizeof(int));
-    int *child_order = malloc(size * sizeof(int));
-    build_spec_bfs_tree(&_spec_sd, root, size, parent, child_order);
-
-    *out_nchunks = nchunks;
-
-    /* Determine children, sorted by child_order (Fiedler priority) */
-    int nchildren = 0;
-    int *children = malloc(size * sizeof(int));
-    int *order    = malloc(size * sizeof(int));
-    for (int i = 0; i < size; i++) {
-        if (parent[i] == rank) {
-            children[nchildren] = i;
-            order[nchildren] = child_order[i];
-            nchildren++;
-        }
-    }
-    /* Sort children by order (ascending = highest Fiedler diff first) */
-    for (int i = 0; i < nchildren; i++) {
-        int best = i;
-        for (int j = i + 1; j < nchildren; j++)
-            if (order[j] < order[best]) best = j;
-        if (best != i) {
-            int tc = children[i]; children[i] = children[best]; children[best] = tc;
-            int to = order[i]; order[i] = order[best]; order[best] = to;
-        }
-    }
-
-    int chunk_size = (count + nchunks - 1) / nchunks;
-
-    /* Allocate send requests: nchildren per chunk */
-    MPI_Request *reqs = (nchildren > 0)
-        ? malloc((size_t)nchildren * nchunks * sizeof(MPI_Request)) : NULL;
-    int nreqs = 0;
-
-    MPI_Barrier(MPI_COMM_WORLD);
-    double t0 = MPI_Wtime();
-
-    for (int c = 0; c < nchunks; c++) {
-        int off = c * chunk_size;
-        int len = chunk_size;
-        if (off + len > count) len = count - off;
-
-        /* Blocking Recv from parent — paces the pipeline */
-        if (rank != root)
-            MPI_Recv((char *)buf + off, len, MPI_BYTE, parent[rank], c,
-                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-        /* Non-blocking send to all children (Fiedler order) */
-        for (int ch = 0; ch < nchildren; ch++)
-            MPI_Isend((char *)buf + off, len, MPI_BYTE, children[ch], c,
-                      MPI_COMM_WORLD, &reqs[nreqs++]);
-    }
-
-    if (nreqs > 0)
-        MPI_Waitall(nreqs, reqs, MPI_STATUSES_IGNORE);
-
-    double t1 = MPI_Wtime();
-
-    free(reqs);
-    free(parent);
-    free(child_order);
-    free(children);
-    free(order);
-    return t1 - t0;
-}
-
-/* ================================================================
- * Algorithm 5: BBS — (stub, not yet implemented)
- * ================================================================ */
-
-/* ================================================================
- * Algorithm 9: Proto — MWU Arborescence Packing
- *
- * Multiplicative Weights Update (Plotkin-Shmoys-Tardos style)
- * fractional packing of spanning out-arborescences.
- * Oracle: Chu-Liu/Edmonds minimum-cost arborescence.
- *
- * Input: directed 1-hop physical adjacency from .tdat latency data,
- *        with unit edge capacities.
- *
- * Output: selects the tree with lowest estimated pipeline broadcast
- *         time from the packing, then broadcasts on that tree.
- *
- * Ref: idea.py prototype; Edmonds, "Optimum Branchings", 1967;
- *      Plotkin/Shmoys/Tardos, MOR 1995.
- * ================================================================ */
-
-/* ---- Chu-Liu/Edmonds minimum-cost spanning arborescence ----
- *
- * Given a directed graph with n nodes (0..n-1), m edges, and a root,
- * finds the minimum-cost spanning out-arborescence rooted at `root`.
- *
- * Returns number of arborescence edges (n-1) on success, -1 on failure.
- * Fills result[] with edge indices into the caller's edge arrays.
- *
- * Algorithm:
- *   1. For each non-root node, select min-cost incoming edge.
- *   2. If selected edges form no cycle → done (this is the MSA).
- *   3. Contract all cycles into super-nodes, adjust incoming edge
- *      costs by subtracting the cycle edge cost, recurse.
- *   4. Expand: for each cycle, include all cycle edges except the
- *      one replaced by the entering edge from the outer arborescence.
- */
-typedef struct {
-    int src, dst;
-    double cost;
-    int orig;   /* original edge index (preserved through contractions) */
-} _cle_edge_t;
-
-static int _cle_solve(int n, int m, const _cle_edge_t *E, int root,
-                       int *result)
-{
-    if (n <= 1) return 0;
-
-    /* Step 1: min incoming edge per non-root node */
-    int *min_e = malloc(n * sizeof(int));
-    for (int i = 0; i < n; i++) min_e[i] = -1;
-
-    for (int e = 0; e < m; e++) {
-        int v = E[e].dst;
-        if (v == root || E[e].src == E[e].dst) continue;
-        if (min_e[v] == -1 || E[e].cost < E[min_e[v]].cost)
-            min_e[v] = e;
-    }
-    for (int v = 0; v < n; v++) {
-        if (v != root && min_e[v] == -1) {
-            free(min_e);
-            return -1;   /* unreachable node → no arborescence */
-        }
-    }
-
-    /* Step 2: detect cycles among selected min-in edges */
-    int *cyc = malloc(n * sizeof(int));
-    int *vis = malloc(n * sizeof(int));
-    for (int i = 0; i < n; i++) { cyc[i] = -1; vis[i] = -1; }
-
-    int nc = 0;
-    for (int s = 0; s < n; s++) {
-        if (s == root) continue;
-        int u = s;
-        while (u != root && vis[u] == -1 && cyc[u] == -1) {
-            vis[u] = s;
-            u = E[min_e[u]].src;
-        }
-        if (u != root && cyc[u] == -1 && vis[u] == s) {
-            int v = u;
-            do { cyc[v] = nc; v = E[min_e[v]].src; } while (v != u);
-            nc++;
-        }
-    }
-
-    if (nc == 0) {
-        /* No cycles: min_e edges form the arborescence directly */
-        int cnt = 0;
-        for (int v = 0; v < n; v++)
-            if (v != root) result[cnt++] = E[min_e[v]].orig;
-        free(min_e); free(cyc); free(vis);
-        return cnt;
-    }
-
-    /* Step 3: contract all cycles into super-nodes */
-    int *nmap = malloc(n * sizeof(int));
-    int nn = nc;  /* first nc IDs are super-nodes for cycles */
-    for (int i = 0; i < n; i++)
-        nmap[i] = (cyc[i] >= 0) ? cyc[i] : nn++;
-
-    double *min_cost = malloc(n * sizeof(double));
-    for (int i = 0; i < n; i++)
-        min_cost[i] = (i != root && min_e[i] >= 0)
-                     ? E[min_e[i]].cost : 0.0;
-
-    /* Build contracted edge list:
-     *   - Remap endpoints through nmap
-     *   - Remove self-loops (both endpoints in same cycle)
-     *   - For edges entering a cycle node v: cost -= min_cost[v] */
-    _cle_edge_t *NE = malloc(m * sizeof(_cle_edge_t));
-    int *enters = malloc(m * sizeof(int));
-    int nm = 0;
-
-    for (int e = 0; e < m; e++) {
-        int u = nmap[E[e].src], v = nmap[E[e].dst];
-        if (u == v) continue;
-        double c = E[e].cost;
-        if (cyc[E[e].dst] >= 0) c -= min_cost[E[e].dst];
-        NE[nm] = (_cle_edge_t){ u, v, c, E[e].orig };
-        enters[nm] = E[e].dst;   /* original node this edge enters */
-        nm++;
-    }
-
-    int new_root = nmap[root];
-
-    /* Recurse on contracted graph */
-    int *sub = malloc((nn - 1) * sizeof(int));
-    int scnt = _cle_solve(nn, nm, NE, new_root, sub);
-    if (scnt < 0) {
-        free(min_e); free(cyc); free(vis); free(nmap);
-        free(min_cost); free(NE); free(enters); free(sub);
-        return -1;
-    }
-
-    /* Step 4: expand — find which cycle node is the entry point */
-    int *entered = malloc(nc * sizeof(int));
-    for (int i = 0; i < nc; i++) entered[i] = -1;
-
-    for (int i = 0; i < scnt; i++) {
-        int oi = sub[i];
-        for (int e = 0; e < nm; e++) {
-            if (NE[e].orig == oi && NE[e].dst < nc) {
-                entered[NE[e].dst] = enters[e];
-                break;
-            }
-        }
-    }
-
-    /* Collect result:
-     *   - All edges from the contracted arborescence (sub[])
-     *   - All cycle min-in edges EXCEPT the entry-point node */
-    int cnt = 0;
-    for (int i = 0; i < scnt; i++)
-        result[cnt++] = sub[i];
-    for (int v = 0; v < n; v++) {
-        if (cyc[v] < 0 || v == root) continue;
-        if (entered[cyc[v]] == v) continue;  /* replaced by entering edge */
-        result[cnt++] = E[min_e[v]].orig;
-    }
-
-    free(min_e); free(cyc); free(vis); free(nmap);
-    free(min_cost); free(NE); free(enters); free(sub); free(entered);
-    return cnt;
-}
-
-/* Public wrapper: find min-cost arborescence rooted at `root`.
- * src[], dst[], cost[] are parallel arrays of m edges on n nodes.
- * Returns n-1 on success, -1 on failure.
- * Fills result_edges[] with indices into src/dst/cost. */
-static int edmonds_msa(int n, int m, const int *src, const int *dst,
-                        const double *cost, int root, int *result_edges)
-{
-    _cle_edge_t *E = malloc(m * sizeof(_cle_edge_t));
-    for (int i = 0; i < m; i++)
-        E[i] = (_cle_edge_t){ src[i], dst[i], cost[i], i };
-    int r = _cle_solve(n, m, E, root, result_edges);
-    free(E);
-    return r;
-}
-
-/* ---- MWU arborescence packing ----
- *
- * Iteratively:
- *   1. Set oracle costs = price[e] / cap[e]
- *   2. Find min-cost arborescence via Edmonds
- *   3. Push delta = eta * bottleneck_residual along the tree
- *   4. Update prices: price[e] *= (1 + eps)^(delta / cap[e])
- *
- * Returns number of distinct trees packed.
- * Fills pack_parents[k] with parent array for tree k.
- * Fills pack_weights[k] with weight of tree k.
- * Caller frees pack_parents[k] for each k.
- */
-#define PROTO_MAX_ITERS 50
-
-static int mwu_arb_packing(
-    int n, int m, const int *src, const int *dst,
-    const double *cap, int root,
-    double eps, double eta, int max_iters,
-    int **pack_parents, double *pack_weights)
-{
-    double *price = malloc(m * sizeof(double));
-    double *used  = calloc(m, sizeof(double));
-    double *ocost = malloc(m * sizeof(double));
-    int *tree_edges = malloc(n * sizeof(int));
-
-    for (int i = 0; i < m; i++) price[i] = 1.0;
-
-    int ntrees = 0;
-
-    for (int t = 0; t < max_iters; t++) {
-        /* Set oracle costs */
-        for (int e = 0; e < m; e++) {
-            double d = cap[e];
-            if (d < 1e-12) d = 1e-12;
-            ocost[e] = price[e] / d;
-        }
-
-        /* Find min-cost arborescence */
-        int ne = edmonds_msa(n, m, src, dst, ocost, root, tree_edges);
-        if (ne < 0) break;
-
-        /* Bottleneck residual */
-        double bottleneck = 1e30;
-        for (int i = 0; i < ne; i++) {
-            int e = tree_edges[i];
-            double resid = cap[e] - used[e];
-            if (resid < bottleneck) bottleneck = resid;
-        }
-        if (bottleneck <= 1e-12) break;
-
-        double delta = eta * bottleneck;
-
-        /* MWU price update */
-        for (int i = 0; i < ne; i++) {
-            int e = tree_edges[i];
-            used[e] += delta;
-            double frac = delta / cap[e];
-            price[e] *= pow(1.0 + eps, frac);
-        }
-
-        /* Convert edge list to parent array */
-        int *par = malloc(n * sizeof(int));
-        for (int v = 0; v < n; v++) par[v] = -1;
-        for (int i = 0; i < ne; i++) {
-            int e = tree_edges[i];
-            par[dst[e]] = src[e];
-        }
-
-        /* Merge duplicate trees */
-        int dup = -1;
-        for (int k = 0; k < ntrees; k++) {
-            int same = 1;
-            for (int v = 0; v < n; v++)
-                if (pack_parents[k][v] != par[v]) { same = 0; break; }
-            if (same) { dup = k; break; }
-        }
-
-        if (dup >= 0) {
-            pack_weights[dup] += delta;
-            free(par);
-        } else {
-            pack_parents[ntrees] = par;
-            pack_weights[ntrees] = delta;
-            ntrees++;
-        }
-    }
-
-    free(price); free(used); free(ocost); free(tree_edges);
-    return ntrees;
-}
-
-/* ---- run_proto: MWU packing + pipelined broadcast ----
- *
- * Rank 0 loads .tdat, builds directed 1-hop graph with unit
- * capacities, runs MWU packing, selects the tree with lowest
- * estimated pipeline time, broadcasts parent array to all ranks.
- * All ranks then do pipelined tree broadcast.
- */
-static double run_proto(void *buf, int count, int rank, int size,
-                        int root, const char *tdat_file,
-                        int *out_nchunks)
-{
-    int *parent = malloc(size * sizeof(int));
-    int nchunks = 1;
-
-    if (rank == 0) {
-        topo_data_t td;
-        int loaded = 0;
-
-        if (topo_data_load(tdat_file, &td) != 0) {
-            fprintf(stderr, "Proto: cannot load %s\n", tdat_file);
-        } else if (td.N != size) {
-            fprintf(stderr, "Proto: .tdat has %d nodes, MPI has %d\n",
-                    td.N, size);
-            topo_data_free(&td);
-        } else {
-            loaded = 1;
-        }
-
-        if (loaded) {
-            int N = td.N;
-
-            /* Build directed 1-hop graph */
-            float lat_1hop = 1e30f;
-            for (int i = 0; i < size; i++)
-                for (int j = 0; j < size; j++) {
-                    float l = td.lat[(size_t)i * N + j];
-                    if (l > 0.0f && l < lat_1hop) lat_1hop = l;
-                }
-            float thresh = lat_1hop * 1.01f;
-
-            int m = 0;
-            for (int i = 0; i < size; i++)
-                for (int j = 0; j < size; j++) {
-                    float l = td.lat[(size_t)i * N + j];
-                    if (l > 0.0f && l <= thresh) m++;
-                }
-
-            int    *src = malloc(m * sizeof(int));
-            int    *dst = malloc(m * sizeof(int));
-            double *cap = malloc(m * sizeof(double));
-            int idx = 0;
-            for (int i = 0; i < size; i++)
-                for (int j = 0; j < size; j++) {
-                    float l = td.lat[(size_t)i * N + j];
-                    if (l > 0.0f && l <= thresh) {
-                        src[idx] = i;
-                        dst[idx] = j;
-                        cap[idx] = 1.0;
-                        idx++;
-                    }
-                }
-
-            /* MWU packing */
-            int **pack_par = malloc(PROTO_MAX_ITERS * sizeof(int *));
-            double *pack_w = malloc(PROTO_MAX_ITERS * sizeof(double));
-
-            int ntrees = mwu_arb_packing(
-                size, m, src, dst, cap, root,
-                0.25, 0.5, PROTO_MAX_ITERS,
-                pack_par, pack_w);
-
-            double total_w = 0;
-            for (int k = 0; k < ntrees; k++) total_w += pack_w[k];
-            fprintf(stderr, "Proto: packed %d trees, value=%.3f\n",
-                    ntrees, total_w);
-
-            /* Select tree with lowest estimated pipeline time */
-            if (ntrees > 0) {
-                double best_T = 1e30;
-                int best_k = 0;
-                for (int k = 0; k < ntrees; k++) {
-                    int K;
-                    double T = _estimate_time(&td, size, pack_par[k],
-                                               count, &K);
-                    if (T < best_T) {
-                        best_T = T;
-                        best_k = k;
-                        nchunks = K;
-                    }
-                }
-                memcpy(parent, pack_par[best_k], size * sizeof(int));
-            } else {
-                /* Fallback: 1-hop BFS tree */
-                build_onehop_bfs(&td, root, size, parent, 0);
-                _estimate_time(&td, size, parent, count, &nchunks);
-            }
-
-            for (int k = 0; k < ntrees; k++) free(pack_par[k]);
-            free(pack_par); free(pack_w);
-            free(src); free(dst); free(cap);
-            topo_data_free(&td);
-        } else {
-            /* Error path: set invalid parent to trigger fallback */
-            for (int i = 0; i < size; i++) parent[i] = -1;
-        }
-    }
-
-    /* Broadcast parent array and nchunks to all ranks */
-    MPI_Bcast(parent, size, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&nchunks, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    *out_nchunks = nchunks;
-
-    /* Determine children */
-    int nchildren = 0;
-    int *children = malloc(size * sizeof(int));
-    for (int i = 0; i < size; i++)
-        if (parent[i] == rank) children[nchildren++] = i;
-
-    /* Pipelined broadcast */
-    int chunk_size = (count + nchunks - 1) / nchunks;
-    int total_sends = nchunks * nchildren;
-    MPI_Request *reqs = total_sends > 0
-        ? malloc((size_t)total_sends * sizeof(MPI_Request)) : NULL;
-    int nsend = 0;
-
-    MPI_Barrier(MPI_COMM_WORLD);
-    double t0 = MPI_Wtime();
-
-    for (int c = 0; c < nchunks; c++) {
-        int off = c * chunk_size;
-        int len = chunk_size;
-        if (off + len > count) len = count - off;
-
-        if (rank != root)
-            MPI_Recv((char *)buf + off, len, MPI_BYTE,
-                     parent[rank], c, MPI_COMM_WORLD,
-                     MPI_STATUS_IGNORE);
-
-        for (int ch = 0; ch < nchildren; ch++)
-            MPI_Isend((char *)buf + off, len, MPI_BYTE,
-                      children[ch], c, MPI_COMM_WORLD,
-                      &reqs[nsend++]);
-    }
-
-    if (nsend > 0)
-        MPI_Waitall(nsend, reqs, MPI_STATUSES_IGNORE);
-
-    double t1 = MPI_Wtime();
-
-    free(reqs); free(parent); free(children);
-    return t1 - t0;
-}
-
-/* ================================================================
- * Algorithm 8: Spectral Binary Tree broadcast (specbin).
- *
- * Global binary tree built via recursive spectral bisection:
- *   1. Sort all non-root nodes by Fiedler value.
- *   2. Split at median into left/right halves.
- *   3. Pick representative of each half = node closest to spectral
- *      centroid (median Fiedler value of that half).
- *   4. Both representatives become children of the current leader.
- *   5. Recurse: each rep leads its half.
- *
- * Depth = ceil(log2(N)) ≈ 7 for N=128 (same as MPI binary tree).
- * Advantage: partitions follow spectral structure of the physical
- * topology, so children are in spectrally coherent sub-networks.
- *
- * Requires pre-loaded _spec_sd (via spec_setup).
- * ================================================================ */
-
-/* Comparator for qsort: sort node indices by Fiedler value */
-static const double *_specbin_fiedler_ptr;   /* set before qsort */
-
-static int _specbin_cmp(const void *a, const void *b)
-{
-    double fa = _specbin_fiedler_ptr[*(const int *)a];
-    double fb = _specbin_fiedler_ptr[*(const int *)b];
-    if (fa < fb) return -1;
-    if (fa > fb) return  1;
-    return 0;
-}
-
-/* Pick the node in nodes[0..n-1] whose Fiedler value is closest
- * to the target value.  Returns its INDEX in the nodes array. */
-static int _specbin_pick_centroid(const int *nodes, int n,
-                                  const double *fiedler, double target)
-{
-    int best = 0;
-    double best_dist = fabs(fiedler[nodes[0]] - target);
-    for (int i = 1; i < n; i++) {
-        double d = fabs(fiedler[nodes[i]] - target);
-        if (d < best_dist) { best_dist = d; best = i; }
-    }
-    return best;
-}
-
-/* Recursive bisection: assign parent for all nodes in subset. */
-static void _specbin_recurse(const double *fiedler,
-                             int *nodes, int n,
-                             int leader, int *parent)
-{
-    if (n == 0) return;
-    if (n == 1) { parent[nodes[0]] = leader; return; }
-    if (n == 2) {
-        parent[nodes[0]] = leader;
-        parent[nodes[1]] = leader;
-        return;
-    }
-
-    /* Sort by Fiedler value */
-    _specbin_fiedler_ptr = fiedler;
-    qsort(nodes, n, sizeof(int), _specbin_cmp);
-
-    int mid = n / 2;
-    /* left = nodes[0..mid-1], right = nodes[mid..n-1] */
-
-    /* Compute median Fiedler for each half */
-    double left_median  = fiedler[nodes[mid / 2]];
-    double right_median = fiedler[nodes[mid + (n - mid) / 2]];
-
-    /* Pick centroids */
-    int li = _specbin_pick_centroid(nodes, mid, fiedler, left_median);
-    int ri_rel = _specbin_pick_centroid(nodes + mid, n - mid,
-                                        fiedler, right_median);
-    int ri = mid + ri_rel;
-
-    int left_rep  = nodes[li];
-    int right_rep = nodes[ri];
-
-    parent[left_rep]  = leader;
-    parent[right_rep] = leader;
-
-    /* Build left subset excluding left_rep */
-    int *left = malloc(mid * sizeof(int));
-    int ln = 0;
-    for (int i = 0; i < mid; i++)
-        if (nodes[i] != left_rep) left[ln++] = nodes[i];
-
-    /* Build right subset excluding right_rep */
-    int *right = malloc((n - mid) * sizeof(int));
-    int rn = 0;
-    for (int i = mid; i < n; i++)
-        if (nodes[i] != right_rep) right[rn++] = nodes[i];
-
-    _specbin_recurse(fiedler, left,  ln, left_rep,  parent);
-    _specbin_recurse(fiedler, right, rn, right_rep, parent);
-
-    free(left);
-    free(right);
-}
-
-static void build_specbin_tree(const double *fiedler, int root,
-                               int size, int *parent)
-{
-    for (int i = 0; i < size; i++) parent[i] = -1;
-
-    int *subset = malloc((size - 1) * sizeof(int));
-    int n = 0;
-    for (int i = 0; i < size; i++)
-        if (i != root) subset[n++] = i;
-
-    _specbin_recurse(fiedler, subset, n, root, parent);
-    free(subset);
-}
-
-static double run_specbin(void *buf, int count, int rank, int size,
-                          int root, int *out_nchunks)
-{
-    int *parent = malloc(size * sizeof(int));
-    build_specbin_tree(_spec_sd.eigvecs, root, size, parent);
-
-    *out_nchunks = 1;
-
-    /* Collect children */
-    int nchildren = 0;
-    int children[2];
-    for (int i = 0; i < size; i++) {
-        if (parent[i] == rank) {
-            children[nchildren++] = i;
-            if (nchildren == 2) break;   /* binary tree: max 2 */
-        }
-    }
-
-    MPI_Request reqs[2];
-
-    MPI_Barrier(MPI_COMM_WORLD);
-    double t0 = MPI_Wtime();
-
-    if (rank != root)
-        MPI_Recv(buf, count, MPI_BYTE, parent[rank], 0,
-                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-    for (int ch = 0; ch < nchildren; ch++)
-        MPI_Isend(buf, count, MPI_BYTE, children[ch], 0,
-                  MPI_COMM_WORLD, &reqs[ch]);
-
-    if (nchildren > 0)
-        MPI_Waitall(nchildren, reqs, MPI_STATUSES_IGNORE);
-
-    double t1 = MPI_Wtime();
-    free(parent);
-    return t1 - t0;
-}
-
-/* ================================================================
  * Main
  * ================================================================ */
 int main(int argc, char **argv)
@@ -2687,7 +2112,7 @@ int main(int argc, char **argv)
         if (rank == 0)
             fprintf(stderr,
                 "Usage: %s <algorithm> <msg_bytes> [nchunks] [root] [out_json] [topo_cfg]\n"
-                "  algorithm  : mpi | srda | pipe | bine | glf | test | spec | proto\n"
+                "  algorithm  : mpi | srda | pipe | bine | glf | ffgb | test\n"
                 "  nchunks    : pipeline depth (default 64, auto for test)\n"
                 "  root       : broadcast root 0..%d or 'all' (default 0)\n"
                 "  out_json   : output JSON file path (optional, _ = none)\n"
@@ -2749,37 +2174,25 @@ int main(int argc, char **argv)
     else if (strcmp(algo, "test") == 0) algo_id = 3;
     else if (strcmp(algo, "bine") == 0) algo_id = 4;
     else if (strcmp(algo, "glf")  == 0) algo_id = 5;
-    else if (strcmp(algo, "spec") == 0) algo_id = 6;
-    else if (strcmp(algo, "rawbino") == 0) algo_id = 7;
-    else if (strcmp(algo, "specbin") == 0) algo_id = 8;
-    else if (strcmp(algo, "proto")  == 0) algo_id = 9;
+    else if (strcmp(algo, "ffgb") == 0) algo_id = 6;
     else {
         if (rank == 0) fprintf(stderr, "Unknown algorithm: %s\n", algo);
         MPI_Finalize();
         return 1;
     }
-    if ((algo_id == 3 || algo_id == 5 || algo_id == 6 || algo_id == 8 || algo_id == 9) && !topo_file) {
+    if ((algo_id == 3 || algo_id == 5 || algo_id == 6) && !topo_file) {
         if (rank == 0)
             fprintf(stderr, "%s algorithm requires topo_cfg argument\n", algo);
         MPI_Finalize();
         return 1;
     }
 
-    /* pipe (2) and spec (6) use nchunks from the command line.
-     * test (3) and specbin (8) compute their own nchunks internally.
+    /* pipe (2) uses nchunks from the command line.
+     * test (3) computes its own nchunks internally.
      * For all others, report nchunks=1 (whole message). */
     int reported_nchunks = nchunks;
-    if (algo_id != 2 && algo_id != 3 && algo_id != 6 && algo_id != 8
-        && algo_id != 9)
+    if (algo_id != 2 && algo_id != 3)
         reported_nchunks = 1;
-
-    /* ---- Pre-load spec data (once, before root loop) ---- */
-    if (algo_id == 6 || algo_id == 8) {
-        if (spec_setup(topo_file, rank, size) != 0) {
-            MPI_Finalize();
-            return 1;
-        }
-    }
 
     /* ---- Root loop ---- */
     int root_lo = all_roots ? 0 : root;
@@ -2808,14 +2221,7 @@ int main(int argc, char **argv)
                 reported_nchunks = nchunks;                                 break;
         case 4: elapsed = run_bine(buf, nbytes, rank, size, r);              break;
         case 5: elapsed = run_glf(buf, nbytes, rank, size, r, topo_file);    break;
-        case 6: elapsed = run_spec(buf, nbytes, rank, size, r,
-                                   nchunks, &reported_nchunks);             break;
-        case 7: elapsed = run_rawbino(buf, nbytes, rank, size, r);           break;
-        case 8: elapsed = run_specbin(buf, nbytes, rank, size, r,
-                                      &nchunks);                              break;
-        case 9: elapsed = run_proto(buf, nbytes, rank, size, r, topo_file,
-                                    &nchunks);
-                reported_nchunks = nchunks;                                 break;
+        case 6: elapsed = run_ffgb(buf, nbytes, rank, size, r, topo_file);   break;
         }
 
         /* ---- Verify ---- */
@@ -2835,9 +2241,6 @@ int main(int argc, char **argv)
 
         MPI_Barrier(MPI_COMM_WORLD);
     }
-
-    /* ---- Cleanup pre-loaded data ---- */
-    if (algo_id == 6 || algo_id == 8) spec_cleanup();
 
     /* ---- Report ---- */
     if (rank == 0) {

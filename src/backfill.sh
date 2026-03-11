@@ -5,10 +5,8 @@
 # Scans the data/ directory for expected JSON files that don't exist
 # and re-dispatches them.  Matches the sweep.sh conventions:
 #
-#   - Main algos (mpi,srda,pipe,bine,glf): bulk mode (--roots all),
+#   - All algos (mpi,srda,pipe,bine,glf,ffgb): bulk mode (--roots all),
 #     output files named  N<N>_MSG<msg>.json  (no _R suffix).
-#   - Spec algo: per-root mode (root=0 only),
-#     output files named  N<N>_MSG<msg>_R0.json.
 #
 # OOM-aware:  automatically lowers concurrency for large N×MSG
 # combinations that previously OOM-killed (signal 137).
@@ -18,7 +16,7 @@
 #   ./backfill.sh --dry-run              # list missing, don't execute
 #   ./backfill.sh -j 8                   # override max workers
 #   ./backfill.sh --sif bcast.sif        # run inside container
-#   ./backfill.sh --algos mpi,spec       # specific algorithms
+#   ./backfill.sh --algos mpi,glf        # specific algorithms
 #   ./backfill.sh --topos FatTree        # specific topologies
 #   ./backfill.sh --sizes 1024           # specific node counts
 #   ./backfill.sh --msgs 67108864        # specific message sizes
@@ -35,7 +33,7 @@ HOST_SPEED="2000Gf"
 # ---- Default parameter space (must match sweep.sh) ----
 TOPOS=(2Dmesh Butterfly Dragonfly FatTree)
 SIZES=(128 256 512 1024)
-ALGOS=(mpi srda pipe bine glf)
+ALGOS=(mpi srda pipe bine glf ffgb)
 MSG_SIZES=(256 1024 4096 16384 65536 262144 1048576 4194304 16777216 67108864)
 
 # ---- Defaults ----
@@ -103,13 +101,6 @@ topo_data_path() {
     echo "${xml%.xml}.tdat"
 }
 
-spec_data_path() {
-    local topo=$1 n=$2
-    local xml
-    xml=$(platform_path "$topo" "$n")
-    echo "${xml%.xml}.sdat"
-}
-
 # ---- OOM-aware concurrency ----
 # Returns the number of workers to use for a given (N, MSG) pair.
 # Large N × large MSG combos previously OOM-killed; throttle them.
@@ -174,13 +165,7 @@ for TOPO in "${TOPOS[@]}"; do
             for MSG in "${MSG_SIZES[@]}"; do
                 NC=$(choose_chunks "$MSG")
 
-                if [[ "$ALGO" == "spec" ]]; then
-                    # Spec: per-root file with _R0 suffix
-                    OUTJSON="$DATA_DIR/$TOPO/$ALGO/N${N}_MSG${MSG}_R0.json"
-                else
-                    # Main algos: bulk file (no _R suffix)
-                    OUTJSON="$DATA_DIR/$TOPO/$ALGO/N${N}_MSG${MSG}.json"
-                fi
+                OUTJSON="$DATA_DIR/$TOPO/$ALGO/N${N}_MSG${MSG}.json"
 
                 # Skip if already exists and is non-empty
                 [[ -s "$OUTJSON" ]] && continue
@@ -194,14 +179,11 @@ for TOPO in "${TOPOS[@]}"; do
                 CMD+=" --cfg=smpi/display-timing:yes"
                 CMD+=" --log=root.thres:warning"
 
-                if [[ "$ALGO" == "spec" ]]; then
-                    CMD+=" $BINARY $ALGO $MSG $NC 0 $OUTJSON"
-                    CMD+=" $(spec_data_path "$TOPO" "$N")"
-                else
-                    CMD+=" $BINARY $ALGO $MSG $NC all $OUTJSON"
-                    if [[ "$ALGO" == "glf" ]]; then
-                        CMD+=" $(topo_cfg_path "$TOPO" "$N")"
-                    fi
+                CMD+=" $BINARY $ALGO $MSG $NC all $OUTJSON"
+                if [[ "$ALGO" == "test" || "$ALGO" == "ffgb" ]]; then
+                    CMD+=" $(topo_data_path "$TOPO" "$N")"
+                elif [[ "$ALGO" == "glf" ]]; then
+                    CMD+=" $(topo_cfg_path "$TOPO" "$N")"
                 fi
 
                 # Route to concurrency tier based on memory pressure
