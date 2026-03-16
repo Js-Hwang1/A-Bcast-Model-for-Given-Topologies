@@ -169,3 +169,39 @@ if __name__ == "__main__":
     print("#trees in support =", len(trees))
     for i, (edges, w) in enumerate(trees, 1):
         print(f"Tree {i}: weight={w:.6f}, edges={len(edges)}")
+
+    # --- Plot trees in a 2x4 grid ---
+    K = len(trees)
+    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+    axes = axes.flatten()
+
+    # Node positions: use the (x, y) coordinates directly
+    pos = {node: node for node in G.nodes()}
+
+    for k in range(min(K, 8)):
+        ax = axes[k]
+        edge_list, weight = trees[k]
+
+        T_graph = nx.DiGraph()
+        T_graph.add_nodes_from(G.nodes())
+        T_graph.add_edges_from(edge_list)
+
+        nx.draw_networkx_edges(T_graph, pos, ax=ax, edge_color='black',
+                               arrows=True, arrowsize=8, width=1.5, alpha=0.9,
+                               arrowstyle='->', min_source_margin=3, min_target_margin=3)
+
+        node_colors = ['red' if n == P else 'skyblue' for n in T_graph.nodes()]
+        nx.draw_networkx_nodes(T_graph, pos, ax=ax, node_size=80,
+                               node_color=node_colors, edgecolors='black', linewidths=0.5)
+
+        ax.set_title(f"Tree {k+1}  (w={weight:.4f})", fontsize=11)
+        ax.set_aspect('equal')
+        ax.axis('off')
+
+    for k in range(K, 8):
+        axes[k].axis('off')
+
+    fig.suptitle(f"MWU Arborescence Packing: {K} Trees on 5x5 Grid", fontsize=14)
+    plt.tight_layout()
+    plt.savefig("proto_trees.png", dpi=150, bbox_inches='tight')
+    plt.show()

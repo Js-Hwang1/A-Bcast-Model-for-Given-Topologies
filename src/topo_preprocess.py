@@ -102,6 +102,8 @@ def build_and_solve(hosts, links, routes):
         compute_names : list of compute-node name strings (sorted by index)
         lat_matrix    : N x N float32  pairwise latency (seconds)
         flink_matrix  : N x N uint16   first-link ID per route
+        path_len      : N x N uint8    number of links on each path
+        path_links    : N x N x max_hops uint16   full path link IDs
         bw_min        : float  minimum link bandwidth (bytes/sec)
         lat_base      : float  minimum link latency (seconds)
         num_links     : int    number of unique links
@@ -113,10 +115,15 @@ def build_and_solve(hosts, links, routes):
     link_idx = {name: i + 1 for i, name in enumerate(link_names)}
     H = len(hosts)
 
-    # Initialise distance and first-link matrices
+    # Initialise distance, first-link, and next-hop matrices
     dist = np.full((H, H), np.inf, dtype=np.float64)
     flink = np.zeros((H, H), dtype=np.int32)
+    next_hop = np.full((H, H), -1, dtype=np.int32)
     np.fill_diagonal(dist, 0.0)
+
+    # Store direct-edge link IDs for path reconstruction
+    # direct_links[(si, di)] = [link_id, ...]
+    direct_links = {}
 
     # Fill direct edges from declared routes
     for src, dst, link_list in routes:
@@ -125,17 +132,23 @@ def build_and_solve(hosts, links, routes):
         si, di = host_idx[src], host_idx[dst]
 
         total_lat = sum(links[lid][1] for lid in link_list)
+        fwd_lids = [link_idx[lid] for lid in link_list]
+        rev_lids = list(reversed(fwd_lids))
         # First link from src toward dst
-        first_lid = link_idx[link_list[0]] if link_list else 0
+        first_lid = fwd_lids[0] if fwd_lids else 0
         # Last link of forward path = first link of reverse direction
-        last_lid = link_idx[link_list[-1]] if link_list else 0
+        last_lid = fwd_lids[-1] if fwd_lids else 0
 
         if total_lat < dist[si, di]:
             dist[si, di] = total_lat
             flink[si, di] = first_lid
+            next_hop[si, di] = di
+            direct_links[(si, di)] = fwd_lids
         if total_lat < dist[di, si]:
             dist[di, si] = total_lat
             flink[di, si] = last_lid
+            next_hop[di, si] = si
+            direct_links[(di, si)] = rev_lids
 
     # ── Floyd-Warshall ──
     print(f"  Floyd-Warshall on {H} hosts ...", end="", flush=True)
@@ -155,6 +168,10 @@ def build_and_solve(hosts, links, routes):
         rows = np.nonzero(mask)[0]           # row indices of updated cells
         flink[mask] = fk[rows]
 
+        # Next-hop update: next_hop[i][j] = next_hop[i][k]
+        nhk = next_hop[:, k].copy()
+        next_hop[mask] = nhk[rows]
+
     t1 = time.time()
     print(f" done in {t1 - t0:.1f}s")
 
@@ -173,11 +190,60 @@ def build_and_solve(hosts, links, routes):
     lat_matrix = dist[np.ix_(idx, idx)].astype(np.float32)
     flink_matrix = flink[np.ix_(idx, idx)].astype(np.uint16)
 
+    # ── Reconstruct full paths for compute-node pairs ──
+    print(f"  Reconstructing full paths for {N}x{N} pairs ...", end="",
+          flush=True)
+    t0 = time.time()
+
+    # Collect all full paths to find max_hops
+    all_paths = {}  # (ci, cj) -> [link_ids]
+    for ci in range(N):
+        hi = compute_host_idx[ci]
+        for cj in range(N):
+            if ci == cj:
+                all_paths[(ci, cj)] = []
+                continue
+            hj = compute_host_idx[cj]
+            # Trace path: hi -> next_hop -> ... -> hj
+            path_lids = []
+            current = hi
+            seen = set()
+            while current != hj and current >= 0:
+                if current in seen:
+                    break  # cycle guard
+                seen.add(current)
+                nxt = next_hop[current, hj]
+                if nxt < 0:
+                    break
+                # Get direct-edge link IDs for (current, nxt)
+                key = (current, nxt)
+                if key in direct_links:
+                    path_lids.extend(direct_links[key])
+                current = nxt
+            all_paths[(ci, cj)] = path_lids
+
+    max_hops = max(len(p) for p in all_paths.values()) if all_paths else 0
+    if max_hops == 0:
+        max_hops = 1  # safety
+
+    path_len = np.zeros((N, N), dtype=np.uint8)
+    path_links_arr = np.zeros((N, N, max_hops), dtype=np.uint16)
+
+    for (ci, cj), lids in all_paths.items():
+        path_len[ci, cj] = len(lids)
+        for k, lid in enumerate(lids):
+            path_links_arr[ci, cj, k] = lid
+
+    t1 = time.time()
+    print(f" done in {t1 - t0:.1f}s (max_hops={max_hops})")
+
     bw_min = min(bw for bw, _lat in links.values())
     lat_base = min(lat for _bw, lat in links.values())
     num_links = len(links)
 
-    return compute_names, lat_matrix, flink_matrix, bw_min, lat_base, num_links
+    return (compute_names, lat_matrix, flink_matrix,
+            path_len, path_links_arr, max_hops,
+            bw_min, lat_base, num_links)
 
 
 # ── Spectral analysis ────────────────────────────────────────────────
@@ -222,13 +288,14 @@ def spectral_analysis(lat_matrix, lat_base):
 
 def write_tdat(path, N, num_links, bw_min, lat_base,
                lat_matrix, flink_matrix,
+               path_len=None, path_links=None, max_hops=0,
                eigenvalues=None, eigenvectors=None):
-    """Write .tdat binary file (v2 with spectral data).
+    """Write .tdat binary file (v3 with spectral data + full paths).
 
     Layout (little-endian):
         Header  (32 bytes):
             char[4]  magic    "TDAT"
-            uint32   version  2
+            uint32   version  3
             uint32   N        number of compute nodes
             uint32   num_links
             float64  bw_min   min bottleneck bandwidth (B/s)
@@ -236,14 +303,19 @@ def write_tdat(path, N, num_links, bw_min, lat_base,
         Data:
             float32[N*N]  lat    pairwise latency matrix
             uint16[N*N]   flink  first-link ID matrix
-        Spectral data (v2):
+        Spectral data (v2+):
             uint32            num_ev       number of eigenvectors
             float64[num_ev]   eigenvalues  λ₂..λ_{k+1}
             float64[num_ev*N] eigenvectors row-major: ev[k][i]
+        Full path data (v3):
+            uint8             max_hops     max links per path
+            uint8[N*N]        path_len     links per path
+            uint16[N*N*max_hops] path_links padded link IDs
     """
+    version = 3 if path_len is not None else VERSION
     with open(path, 'wb') as f:
         f.write(MAGIC)
-        f.write(struct.pack('<I', VERSION))
+        f.write(struct.pack('<I', version))
         f.write(struct.pack('<I', N))
         f.write(struct.pack('<I', num_links))
         f.write(struct.pack('<d', bw_min))
@@ -256,6 +328,11 @@ def write_tdat(path, N, num_links, bw_min, lat_base,
         if num_ev > 0:
             f.write(eigenvalues.astype('<f8').tobytes())
             f.write(eigenvectors.astype('<f8').tobytes())
+        # Full path data (v3)
+        if path_len is not None:
+            f.write(struct.pack('<B', max_hops))
+            f.write(path_len.astype('<u1').tobytes())
+            f.write(path_links.astype('<u2').tobytes())
 
 
 # ── Debug text writer ────────────────────────────────────────────────
@@ -341,12 +418,14 @@ def main():
     print(f"  {len(hosts)} hosts, {len(links)} links, "
           f"{len(routes)} routes")
 
-    compute_names, lat_matrix, flink_matrix, bw_min, lat_base, \
-        num_links = build_and_solve(hosts, links, routes)
+    (compute_names, lat_matrix, flink_matrix,
+     path_len, path_links, max_hops,
+     bw_min, lat_base, num_links) = build_and_solve(hosts, links, routes)
     N = len(compute_names)
     print(f"  {N} compute nodes")
     print(f"  bw_min   = {bw_min:.6e} B/s")
     print(f"  lat_base = {lat_base:.6e} s")
+    print(f"  max_hops = {max_hops}")
 
     eigenvalues, eigenvectors = spectral_analysis(lat_matrix, lat_base)
     print(f"  {len(eigenvalues)} eigenvectors (ceil(log2({N})))")
@@ -357,7 +436,9 @@ def main():
         print(f"  λ₃/λ₂ = {gap:.4f}  (spectral gap ratio)")
 
     write_tdat(tdat_path, N, num_links, bw_min, lat_base,
-               lat_matrix, flink_matrix, eigenvalues, eigenvectors)
+               lat_matrix, flink_matrix,
+               path_len, path_links, max_hops,
+               eigenvalues, eigenvectors)
     sz = os.path.getsize(tdat_path)
     print(f"  Wrote {tdat_path} ({sz:,} bytes)")
 

@@ -27,7 +27,16 @@
  *
  * Usage:
  *   smpirun -np N -platform <xml> -hostfile <hf> \
- *           ./runner <algo> <bytes> [chunks] [root] [out_json]
+ *           ./runner <algo> <bytes> [chunks] [root] [out_json] [topo_cfg]
+ *
+ *   Sweep mode (smart root sweep with resume):
+ *   smpirun -np N -platform <xml> -hostfile <hf> \
+ *           ./runner <algo> <bytes> [chunks] sweep <outdir> [topo_cfg]
+ *
+ *   Sweep checks outdir/N{N}_MSG{M}.json — skips if done.
+ *   Otherwise checks per-root outdir/N{N}_MSG{M}_R{r}.json,
+ *   runs only missing roots, aggregates, cleans up.
+ *   Safe to re-run after crash/OOM — picks up where it left off.
  *
  * Output:
  *   algorithm : <algo>
@@ -47,6 +56,9 @@
 #include <string.h>
 #include <math.h>
 #include <stdint.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 /* ================================================================
  * Algorithm 1: Native MPI_Bcast
@@ -1143,7 +1155,7 @@ static double run_ffgb(void *buf, int count, int rank, int size,
         uint32_t version, n, num_links;
         if (fread(magic, 1, 4, fp) != 4 || memcmp(magic, "TDAT", 4) != 0)
             { fclose(fp); return -1.0; }
-        if (fread(&version, 4, 1, fp) != 1 || (version != 1 && version != 2))
+        if (fread(&version, 4, 1, fp) != 1 || (version < 1 || version > 3))
             { fclose(fp); return -1.0; }
         if (fread(&n, 4, 1, fp) != 1) { fclose(fp); return -1.0; }
         if (fread(&num_links, 4, 1, fp) != 1) { fclose(fp); return -1.0; }
@@ -1325,6 +1337,260 @@ static double run_ffgb(void *buf, int count, int rank, int size,
 }
 
 /* ================================================================
+ * Algorithm 7: OBFS — Optimal BFS Tree Broadcast
+ *
+ * Builds a BFS spanning tree from the root on the 1-hop adjacency
+ * graph derived from the pairwise latency matrix.  BFS minimises
+ * tree depth, and since all tree edges are disjoint links, every
+ * level's transfers run at full bandwidth with zero contention.
+ *
+ * T = depth × T_1hop  (no pipelining, no chunking).
+ *
+ * For multi-component 1-hop graphs (e.g. FatTree leaf groups),
+ * components are chained via the shortest available multi-hop link.
+ *
+ * Requires: .tdat topology data file.
+ * ================================================================ */
+static double run_obfs(void *buf, int count, int rank, int size,
+                       int root, const char *topo_file, int nchunks)
+{
+    /* ---- Load topology data ---- */
+    typedef struct {
+        int      N;
+        double   bw_min, lat_base;
+        float    *lat;
+        uint16_t *flink;
+    } td_t;
+
+    td_t td;
+    {
+        FILE *fp = fopen(topo_file, "rb");
+        if (!fp) {
+            if (rank == 0)
+                fprintf(stderr, "Error: cannot open topo data: %s\n",
+                        topo_file);
+            return -1.0;
+        }
+        char magic[4];
+        uint32_t version, n, num_links;
+        if (fread(magic, 1, 4, fp) != 4 || memcmp(magic, "TDAT", 4) != 0)
+            { fclose(fp); return -1.0; }
+        if (fread(&version, 4, 1, fp) != 1 || (version < 1 || version > 3))
+            { fclose(fp); return -1.0; }
+        if (fread(&n, 4, 1, fp) != 1) { fclose(fp); return -1.0; }
+        if (fread(&num_links, 4, 1, fp) != 1) { fclose(fp); return -1.0; }
+        if (fread(&td.bw_min, 8, 1, fp) != 1) { fclose(fp); return -1.0; }
+        if (fread(&td.lat_base, 8, 1, fp) != 1) { fclose(fp); return -1.0; }
+
+        td.N = (int)n;
+        size_t nn = (size_t)n * n;
+        td.lat   = malloc(nn * sizeof(float));
+        td.flink = malloc(nn * sizeof(uint16_t));
+        if (fread(td.lat, sizeof(float), nn, fp) != nn)
+            { free(td.lat); free(td.flink); fclose(fp); return -1.0; }
+        if (fread(td.flink, sizeof(uint16_t), nn, fp) != nn)
+            { free(td.lat); free(td.flink); fclose(fp); return -1.0; }
+        fclose(fp);
+    }
+
+    if (td.N != size) {
+        if (rank == 0)
+            fprintf(stderr,
+                "Error: .tdat has %d nodes but MPI size is %d\n",
+                td.N, size);
+        free(td.lat); free(td.flink);
+        return -1.0;
+    }
+
+    int N = size;
+    int *parent = malloc(N * sizeof(int));
+
+    /* ---- Build BFS tree on rank 0 ---- */
+    if (rank == 0) {
+        for (int i = 0; i < N; i++) parent[i] = -1;
+
+        /* 1-hop threshold: smallest positive latency × 1.01 */
+        float lat_1hop = 1e30f;
+        for (int i = 0; i < N; i++)
+            for (int j = 0; j < N; j++) {
+                float l = td.lat[(size_t)i * N + j];
+                if (l > 0.0f && l < lat_1hop) lat_1hop = l;
+            }
+        float lat_thresh = lat_1hop * 1.01f;
+
+        char *visited = calloc(N, 1);
+        int  *queue   = malloc(N * sizeof(int));
+        int  *nbrs    = malloc(N * sizeof(int));
+        float *nbr_lat = malloc(N * sizeof(float));
+
+        /* BFS from root on 1-hop graph */
+        int qh = 0, qt = 0;
+        visited[root] = 1;
+        queue[qt++] = root;
+
+        while (qh < qt) {
+            int u = queue[qh++];
+            /* Collect 1-hop unvisited neighbors */
+            int nn = 0;
+            for (int v = 0; v < N; v++) {
+                if (visited[v]) continue;
+                float l = td.lat[(size_t)u * N + v];
+                if (l > 0.0f && l <= lat_thresh) {
+                    nbrs[nn] = v;
+                    nbr_lat[nn] = l;
+                    nn++;
+                }
+            }
+            /* Sort neighbors by latency (closest first) */
+            for (int i = 1; i < nn; i++) {
+                int kn = nbrs[i];
+                float kl = nbr_lat[i];
+                int j = i - 1;
+                while (j >= 0 && nbr_lat[j] > kl) {
+                    nbrs[j+1] = nbrs[j];
+                    nbr_lat[j+1] = nbr_lat[j];
+                    j--;
+                }
+                nbrs[j+1] = kn;
+                nbr_lat[j+1] = kl;
+            }
+            /* Add all to BFS tree (no fanout limit) */
+            for (int i = 0; i < nn; i++) {
+                int v = nbrs[i];
+                if (visited[v]) continue;  /* may have been added by another */
+                visited[v] = 1;
+                parent[v] = u;
+                queue[qt++] = v;
+            }
+        }
+
+        /* Handle disconnected 1-hop components:
+         * link unvisited nodes via shortest multi-hop path to any
+         * visited node, then continue BFS within their component. */
+        while (qt < N) {
+            /* Find the unvisited node closest to any visited node */
+            int best_u = -1, best_v = -1;
+            float best_l = 1e30f;
+            for (int v = 0; v < N; v++) {
+                if (visited[v]) continue;
+                for (int u = 0; u < N; u++) {
+                    if (!visited[u]) continue;
+                    float l = td.lat[(size_t)u * N + v];
+                    if (l > 0.0f && l < best_l) {
+                        best_l = l;
+                        best_u = u;
+                        best_v = v;
+                    }
+                }
+            }
+            if (best_v < 0) break;  /* shouldn't happen */
+
+            /* Attach and continue BFS from this node */
+            visited[best_v] = 1;
+            parent[best_v] = best_u;
+            queue[qt++] = best_v;
+
+            /* Continue BFS on 1-hop edges from this new component */
+            while (qh < qt) {
+                int u = queue[qh++];
+                int nn = 0;
+                for (int v = 0; v < N; v++) {
+                    if (visited[v]) continue;
+                    float l = td.lat[(size_t)u * N + v];
+                    if (l > 0.0f && l <= lat_thresh) {
+                        nbrs[nn] = v;
+                        nbr_lat[nn] = l;
+                        nn++;
+                    }
+                }
+                for (int i = 1; i < nn; i++) {
+                    int kn = nbrs[i];
+                    float kl = nbr_lat[i];
+                    int j = i - 1;
+                    while (j >= 0 && nbr_lat[j] > kl) {
+                        nbrs[j+1] = nbrs[j];
+                        nbr_lat[j+1] = nbr_lat[j];
+                        j--;
+                    }
+                    nbrs[j+1] = kn;
+                    nbr_lat[j+1] = kl;
+                }
+                for (int i = 0; i < nn; i++) {
+                    int v = nbrs[i];
+                    if (visited[v]) continue;
+                    visited[v] = 1;
+                    parent[v] = u;
+                    queue[qt++] = v;
+                }
+            }
+        }
+
+        free(visited);
+        free(queue);
+        free(nbrs);
+        free(nbr_lat);
+    }
+
+    /* ---- Broadcast tree to all ranks ---- */
+    MPI_Bcast(parent, N, MPI_INT, 0, MPI_COMM_WORLD);
+
+    /* ---- Derive children list for this rank ---- */
+    int nchildren = 0;
+    for (int i = 0; i < N; i++)
+        if (parent[i] == rank) nchildren++;
+
+    int *children = NULL;
+    if (nchildren > 0) {
+        children = malloc(nchildren * sizeof(int));
+        int idx = 0;
+        for (int i = 0; i < N; i++)
+            if (parent[i] == rank)
+                children[idx++] = i;
+    }
+
+    /* ---- Execute pipelined broadcast ---- */
+    if (nchunks < 1) nchunks = 1;
+    int chunk_sz = count / nchunks;
+    if (chunk_sz < 1) { nchunks = count; chunk_sz = 1; }
+
+    /* Fire-and-forget: collect ALL requests, single Waitall at end */
+    int max_reqs = nchunks * nchildren;
+    MPI_Request *reqs = max_reqs > 0
+        ? malloc(max_reqs * sizeof(MPI_Request)) : NULL;
+    int nreqs = 0;
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    double t0 = MPI_Wtime();
+
+    for (int c = 0; c < nchunks; c++) {
+        int offset = c * chunk_sz;
+        int thiscount = (c == nchunks - 1) ? count - offset : chunk_sz;
+        char *ptr = (char *)buf + offset;
+
+        if (rank != root)
+            MPI_Recv(ptr, thiscount, MPI_BYTE, parent[rank], c,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        for (int ch = 0; ch < nchildren; ch++)
+            MPI_Isend(ptr, thiscount, MPI_BYTE, children[ch], c,
+                      MPI_COMM_WORLD, &reqs[nreqs++]);
+    }
+
+    if (nreqs > 0)
+        MPI_Waitall(nreqs, reqs, MPI_STATUSES_IGNORE);
+
+    double t1 = MPI_Wtime();
+
+    free(reqs);
+    free(children);
+    free(parent);
+    free(td.lat);
+    free(td.flink);
+
+    return t1 - t0;
+}
+
+/* ================================================================
  * Data-driven topology structures (replaces topo_cfg_t for run_test)
  *
  * Loaded from .tdat files produced by topo_preprocess.py.
@@ -1347,6 +1613,9 @@ typedef struct {
     int      num_ev;      /* number of eigenvectors (0 if v1)       */
     double   *eigenvalues; /* num_ev eigenvalues (λ₂..λ_{k+1})     */
     double   *eigvecs;    /* num_ev * N eigenvector matrix          */
+    int      max_hops;    /* max links per path (0 if no path data) */
+    uint8_t  *path_len;   /* N*N path lengths (NULL if no path data)*/
+    uint16_t *path_links; /* N*N*max_hops full path link IDs        */
 } topo_data_t;
 
 static int topo_data_load(const char *path, topo_data_t *td)
@@ -1359,7 +1628,7 @@ static int topo_data_load(const char *path, topo_data_t *td)
 
     if (fread(magic, 1, 4, fp) != 4 || memcmp(magic, "TDAT", 4) != 0)
         { fclose(fp); return -1; }
-    if (fread(&version, 4, 1, fp) != 1 || (version != 1 && version != 2))
+    if (fread(&version, 4, 1, fp) != 1 || (version < 1 || version > 3))
         { fclose(fp); return -1; }
     if (fread(&n, 4, 1, fp) != 1)
         { fclose(fp); return -1; }
@@ -1405,6 +1674,28 @@ static int topo_data_load(const char *path, topo_data_t *td)
         }
     }
 
+    /* Full path data (v3) */
+    td->max_hops   = 0;
+    td->path_len   = NULL;
+    td->path_links = NULL;
+
+    if (version >= 3) {
+        uint8_t mh;
+        if (fread(&mh, 1, 1, fp) == 1 && mh > 0) {
+            td->max_hops = (int)mh;
+            td->path_len   = malloc(nn * sizeof(uint8_t));
+            td->path_links = malloc(nn * mh * sizeof(uint16_t));
+            if (fread(td->path_len, 1, nn, fp) != nn ||
+                fread(td->path_links, sizeof(uint16_t), nn * mh, fp)
+                    != nn * mh) {
+                free(td->path_len); free(td->path_links);
+                td->max_hops = 0;
+                td->path_len = NULL;
+                td->path_links = NULL;
+            }
+        }
+    }
+
     fclose(fp);
     return 0;
 }
@@ -1415,10 +1706,14 @@ static void topo_data_free(topo_data_t *td)
     free(td->flink);
     free(td->eigenvalues);
     free(td->eigvecs);
+    free(td->path_len);
+    free(td->path_links);
     td->lat         = NULL;
     td->flink       = NULL;
     td->eigenvalues = NULL;
     td->eigvecs     = NULL;
+    td->path_len    = NULL;
+    td->path_links  = NULL;
 }
 
 /* ================================================================
@@ -1664,6 +1959,8 @@ static void build_onehop_bfs(const topo_data_t *td, int root,
     free(comp_id); free(comp_roots); free(comp_sizes);
     free(ambassadors); free(comp_order); free(comp_dist);
 }
+
+#include "../BBS/bbs.c"
 
 /* Farthest-Point-First (FPF) Dispersion Tree.
  *
@@ -2098,6 +2395,277 @@ static double run_test(void *buf, int count, int rank, int size,
 }
 
 /* ================================================================
+ * Sweep helpers — resume-capable root sweep with per-root checkpoints
+ *
+ * Usage:  runner <algo> <bytes> <nchunks> sweep <outdir> [topo_cfg]
+ *
+ * For a given (algo, msg_bytes, N):
+ *   1. If bulk  outdir/N{N}_MSG{M}.json exists       → skip, exit 0
+ *   2. Check which outdir/N{N}_MSG{M}_R{r}.json exist → skip those roots
+ *   3. Run only missing roots, write per-root JSON after each
+ *   4. Aggregate all per-root JSONs → bulk JSON
+ *   5. Remove per-root files
+ * ================================================================ */
+
+static int file_exists(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    if (f) { fclose(f); return 1; }
+    return 0;
+}
+
+/* Parse time_sec and correct from a per-root JSON file */
+static int parse_root_json(const char *path, double *t, int *ok)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    char line[256];
+    *t = 0.0; *ok = 1;
+    while (fgets(line, sizeof(line), f)) {
+        char *p;
+        if ((p = strstr(line, "\"time_sec\""))) {
+            p = strchr(p, ':');
+            if (p) sscanf(p + 1, " %lf", t);
+        } else if ((p = strstr(line, "\"correct\""))) {
+            *ok = strstr(p, "false") ? 0 : 1;
+        }
+    }
+    fclose(f);
+    return 0;
+}
+
+/* ================================================================
+ * Parallel sweep launcher — runs BEFORE MPI_Init.
+ *
+ * Spawns independent smpirun processes (one per missing root) with
+ * fork()/exec(), limited to SWEEP_JOBS concurrency.
+ *
+ * Required env:
+ *   SWEEP_SMPI  — smpirun command prefix, e.g.:
+ *       "smpirun -np 128 -platform p.xml -hostfile h.txt --cfg=..."
+ *     or with singularity:
+ *       "singularity exec --bind /path img.sif smpirun -np 128 ..."
+ *
+ * Optional env:
+ *   SWEEP_JOBS  — max parallel jobs (default 8)
+ *
+ * Each child runs:
+ *   $SWEEP_SMPI <self> <algo> <msg> <nchunks> <root> <outdir>/N_MSG_R<root>.json [topo_cfg]
+ * ================================================================ */
+static int run_sweep_parallel(int argc, char **argv, const char *smpi_cmd)
+{
+    const char *algo = argv[1];
+    int msg          = atoi(argv[2]);
+    int nchunks_arg  = (argc > 3) ? atoi(argv[3]) : 64;
+    /* argv[4] = "sweep" */
+    const char *outdir   = (argc > 5) ? argv[5] : NULL;
+    const char *topo_cfg = (argc > 6) ? argv[6] : NULL;
+    if (topo_cfg && strcmp(topo_cfg, "_") == 0) topo_cfg = NULL;
+
+    if (!outdir) {
+        fprintf(stderr, "sweep requires: runner <algo> <msg> [nchunks] sweep <outdir> [topo_cfg]\n");
+        return 1;
+    }
+
+    /* Get binary path for re-invocation */
+    const char *bin_path = getenv("SWEEP_BIN");
+    if (!bin_path) bin_path = argv[0];
+
+    /* Concurrency limit */
+    const char *jobs_str = getenv("SWEEP_JOBS");
+    int max_jobs = jobs_str ? atoi(jobs_str) : 8;
+    if (max_jobs < 1) max_jobs = 1;
+
+    /* Parse N from the -np argument in SWEEP_SMPI */
+    int N = 0;
+    {
+        const char *np = strstr(smpi_cmd, "-np ");
+        if (np) N = atoi(np + 4);
+    }
+    if (N <= 0) {
+        fprintf(stderr, "ERROR: cannot find -np <N> in SWEEP_SMPI\n");
+        return 1;
+    }
+
+    /* reported nchunks for JSON output */
+    int reported_nc = nchunks_arg;
+    if (strcmp(algo, "pipe") != 0 && strcmp(algo, "obfs") != 0 &&
+        strcmp(algo, "test") != 0)
+        reported_nc = 1;
+
+    /* 1. Bulk JSON already exists → skip */
+    char bulk_path[4096];
+    snprintf(bulk_path, sizeof(bulk_path),
+             "%s/N%d_MSG%d.json", outdir, N, msg);
+    if (file_exists(bulk_path)) {
+        printf("--- %s N=%d MSG=%d already done, skipping ---\n",
+               algo, N, msg);
+        return 0;
+    }
+
+    /* 2. Check which per-root JSONs already exist */
+    int *root_done = calloc(N, sizeof(int));
+    int n_existing = 0;
+    for (int r = 0; r < N; r++) {
+        char rp[4096];
+        snprintf(rp, sizeof(rp),
+                 "%s/N%d_MSG%d_R%d.json", outdir, N, msg, r);
+        root_done[r] = file_exists(rp);
+        n_existing += root_done[r];
+    }
+
+    int n_todo = N - n_existing;
+    if (n_todo == 0)
+        printf("--- %s N=%d MSG=%d: all %d roots cached, aggregating ---\n",
+               algo, N, msg, N);
+    else if (n_existing > 0)
+        printf("--- %s N=%d MSG=%d: %d/%d cached, running %d (j=%d) ---\n",
+               algo, N, msg, n_existing, N, n_todo, max_jobs);
+    else
+        printf("--- %s N=%d MSG=%d: running all %d roots (j=%d) ---\n",
+               algo, N, msg, N, max_jobs);
+    fflush(stdout);
+
+    /* 3. Fork parallel smpirun processes for missing roots */
+    int running = 0, any_fail = 0;
+
+    for (int r = 0; r < N; r++) {
+        if (root_done[r]) continue;
+
+        /* Wait if at concurrency limit */
+        while (running >= max_jobs) {
+            int status;
+            wait(&status);
+            running--;
+            if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+                any_fail = 1;
+        }
+
+        pid_t pid = fork();
+        if (pid == 0) {
+            /* Child: exec smpirun for this single root */
+            char rp[4096];
+            snprintf(rp, sizeof(rp),
+                     "%s/N%d_MSG%d_R%d.json", outdir, N, msg, r);
+            char cmd[16384];
+            if (topo_cfg)
+                snprintf(cmd, sizeof(cmd),
+                    "%s %s %s %d %d %d %s %s",
+                    smpi_cmd, bin_path, algo, msg, nchunks_arg, r, rp, topo_cfg);
+            else
+                snprintf(cmd, sizeof(cmd),
+                    "%s %s %s %d %d %d %s",
+                    smpi_cmd, bin_path, algo, msg, nchunks_arg, r, rp);
+            execlp("sh", "sh", "-c", cmd, (char *)NULL);
+            _exit(127);
+        } else if (pid < 0) {
+            fprintf(stderr, "ERROR: fork() failed for root %d\n", r);
+            any_fail = 1;
+        } else {
+            running++;
+        }
+    }
+
+    /* Drain remaining children */
+    while (running > 0) {
+        int status;
+        wait(&status);
+        running--;
+        if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+            any_fail = 1;
+    }
+
+    if (any_fail)
+        fprintf(stderr,
+            "WARNING: some roots failed — will aggregate what exists\n");
+
+    /* 4. Aggregate all per-root JSONs → bulk JSON */
+    double *atimes = calloc(N, sizeof(double));
+    int correct = 1, any_missing = 0;
+
+    for (int r = 0; r < N; r++) {
+        char rp[4096];
+        snprintf(rp, sizeof(rp),
+                 "%s/N%d_MSG%d_R%d.json", outdir, N, msg, r);
+        double t; int ok;
+        if (parse_root_json(rp, &t, &ok) != 0) {
+            fprintf(stderr, "ERROR: missing root %d (%s) — cannot aggregate\n",
+                    r, rp);
+            any_missing = 1;
+            break;
+        }
+        atimes[r] = t;
+        if (!ok) correct = 0;
+    }
+
+    if (!any_missing) {
+        double sum = 0, mn = atimes[0], mx = atimes[0];
+        for (int i = 0; i < N; i++) {
+            sum += atimes[i];
+            if (atimes[i] < mn) mn = atimes[i];
+            if (atimes[i] > mx) mx = atimes[i];
+        }
+        double mean = sum / N;
+        double sum2 = 0;
+        for (int i = 0; i < N; i++)
+            sum2 += (atimes[i] - mean) * (atimes[i] - mean);
+        double stdev = sqrt(sum2 / N);
+
+        FILE *jfp = fopen(bulk_path, "w");
+        if (jfp) {
+            fprintf(jfp,
+                "{\n"
+                "  \"algorithm\": \"%s\",\n"
+                "  \"nodes\": %d,\n"
+                "  \"msg_bytes\": %d,\n"
+                "  \"nchunks\": %d,\n"
+                "  \"n_roots\": %d,\n"
+                "  \"mean_sec\": %.9e,\n"
+                "  \"stdev_sec\": %.9e,\n"
+                "  \"min_sec\": %.9e,\n"
+                "  \"max_sec\": %.9e,\n"
+                "  \"correct\": %s,\n"
+                "  \"per_root_sec\": [",
+                algo, N, msg, reported_nc,
+                N, mean, stdev, mn, mx,
+                correct ? "true" : "false");
+            for (int i = 0; i < N; i++)
+                fprintf(jfp, "%s%.9e", i ? ", " : "", atimes[i]);
+            fprintf(jfp, "]\n}\n");
+            fclose(jfp);
+        }
+
+        /* 5. Cleanup per-root files */
+        for (int r = 0; r < N; r++) {
+            char rp[4096];
+            snprintf(rp, sizeof(rp),
+                     "%s/N%d_MSG%d_R%d.json", outdir, N, msg, r);
+            remove(rp);
+        }
+
+        printf("  %s N=%d MSG=%d: mean=%.6e max=%.6e max/min=%.1fx %s\n",
+               algo, N, msg, mean, mx, mx / mn,
+               correct ? "OK" : "FAIL");
+    } else {
+        /* Count how many roots we DO have so user knows progress */
+        int have = 0;
+        for (int r = 0; r < N; r++) {
+            char rp[4096];
+            snprintf(rp, sizeof(rp),
+                     "%s/N%d_MSG%d_R%d.json", outdir, N, msg, r);
+            if (file_exists(rp)) have++;
+        }
+        fprintf(stderr,
+            "  %s N=%d MSG=%d: %d/%d roots completed — re-run to finish\n",
+            algo, N, msg, have, N);
+    }
+
+    free(atimes);
+    free(root_done);
+    return any_missing ? 1 : 0;
+}
+
+/* ================================================================
  * Main
  * ================================================================ */
 int main(int argc, char **argv)
@@ -2111,13 +2679,17 @@ int main(int argc, char **argv)
     if (argc < 3) {
         if (rank == 0)
             fprintf(stderr,
-                "Usage: %s <algorithm> <msg_bytes> [nchunks] [root] [out_json] [topo_cfg]\n"
-                "  algorithm  : mpi | srda | pipe | bine | glf | ffgb | test\n"
+                "Usage: %s <algo> <msg_bytes> [nchunks] [root] [out_json] [topo_cfg]\n"
+                "       %s <algo> <msg_bytes> [nchunks] sweep <outdir> [topo_cfg]\n"
+                "  algorithm  : mpi | srda | pipe | bine | glf | ffgb | obfs | test\n"
                 "  nchunks    : pipeline depth (default 64, auto for test)\n"
-                "  root       : broadcast root 0..%d or 'all' (default 0)\n"
-                "  out_json   : output JSON file path (optional, _ = none)\n"
-                "  topo_cfg   : topology config file (required for 'test')\n",
-                argv[0], size - 1);
+                "  root       : 0..%d | 'all' | 'sweep' (default 0)\n"
+                "  sweep      : smart root sweep — skips existing per-root JSONs,\n"
+                "               runs missing roots, aggregates, cleans up\n"
+                "  out_json   : output JSON file (single/all root mode)\n"
+                "  outdir     : output directory  (sweep mode)\n"
+                "  topo_cfg   : topology config file (required for glf/test)\n",
+                argv[0], argv[0], size - 1);
         MPI_Finalize();
         return 1;
     }
@@ -2131,12 +2703,24 @@ int main(int argc, char **argv)
     if (out_json  && strcmp(out_json,  "_") == 0) out_json  = NULL;
     if (topo_file && strcmp(topo_file, "_") == 0) topo_file = NULL;
 
-    /* root = "all" → sweep every root in a single invocation */
-    int all_roots = 0;
+    int all_roots  = 0;
+    int sweep_mode = 0;
+    const char *sweep_outdir = NULL;
     int root = 0;
     if (argc > 4) {
         if (strcmp(argv[4], "all") == 0) {
             all_roots = 1;
+        } else if (strcmp(argv[4], "sweep") == 0) {
+            sweep_mode = 1;
+            sweep_outdir = (argc > 5) ? argv[5] : NULL;
+            topo_file    = (argc > 6) ? argv[6] : NULL;
+            if (topo_file && strcmp(topo_file, "_") == 0) topo_file = NULL;
+            if (!sweep_outdir) {
+                if (rank == 0)
+                    fprintf(stderr, "sweep mode requires <outdir>\n");
+                MPI_Finalize();
+                return 1;
+            }
         } else {
             root = atoi(argv[4]);
         }
@@ -2147,9 +2731,9 @@ int main(int argc, char **argv)
         MPI_Finalize();
         return 1;
     }
-    if (!all_roots && (root < 0 || root >= size)) {
+    if (!all_roots && !sweep_mode && (root < 0 || root >= size)) {
         if (rank == 0)
-            fprintf(stderr, "root must be in 0..%d or 'all' (got %d)\n",
+            fprintf(stderr, "root must be in 0..%d or 'all'/'sweep' (got %d)\n",
                     size - 1, root);
         MPI_Finalize();
         return 1;
@@ -2175,12 +2759,14 @@ int main(int argc, char **argv)
     else if (strcmp(algo, "bine") == 0) algo_id = 4;
     else if (strcmp(algo, "glf")  == 0) algo_id = 5;
     else if (strcmp(algo, "ffgb") == 0) algo_id = 6;
+    else if (strcmp(algo, "obfs") == 0) algo_id = 7;
+    else if (strcmp(algo, "bbs")  == 0) algo_id = 8;
     else {
         if (rank == 0) fprintf(stderr, "Unknown algorithm: %s\n", algo);
         MPI_Finalize();
         return 1;
     }
-    if ((algo_id == 3 || algo_id == 5 || algo_id == 6) && !topo_file) {
+    if ((algo_id == 3 || algo_id == 5 || algo_id == 6 || algo_id == 7 || algo_id == 8) && !topo_file) {
         if (rank == 0)
             fprintf(stderr, "%s algorithm requires topo_cfg argument\n", algo);
         MPI_Finalize();
@@ -2191,10 +2777,226 @@ int main(int argc, char **argv)
      * test (3) computes its own nchunks internally.
      * For all others, report nchunks=1 (whole message). */
     int reported_nchunks = nchunks;
-    if (algo_id != 2 && algo_id != 3)
+    if (algo_id != 2 && algo_id != 3 && algo_id != 7 && algo_id != 8)
         reported_nchunks = 1;
 
-    /* ---- Root loop ---- */
+    /* ================================================================
+     * Sweep mode: smart root sweep with per-root checkpoint/resume
+     *
+     * Two sub-modes:
+     *   SWEEP_SMPI set → rank 0 forks parallel smpirun children (fast)
+     *   SWEEP_SMPI unset → sequential root loop within this process
+     * ================================================================ */
+    if (sweep_mode) {
+        /* Parallel sweep: rank 0 forks children, others wait */
+        const char *smpi_cmd = getenv("SWEEP_SMPI");
+        if (smpi_cmd && strlen(smpi_cmd) > 0) {
+            int ret = 0;
+            if (rank == 0)
+                ret = run_sweep_parallel(argc, argv, smpi_cmd);
+            MPI_Barrier(MPI_COMM_WORLD);
+            MPI_Finalize();
+            return ret;
+        }
+
+        /* Sequential sweep fallback (no SWEEP_SMPI) */
+        char bulk_path[4096];
+        snprintf(bulk_path, sizeof(bulk_path),
+                 "%s/N%d_MSG%d.json", sweep_outdir, size, nbytes);
+
+        /* 1. Already fully aggregated? → done */
+        int skip_all = 0;
+        if (rank == 0)
+            skip_all = file_exists(bulk_path);
+        MPI_Bcast(&skip_all, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        if (skip_all) {
+            if (rank == 0)
+                printf("--- %s N=%d MSG=%d already done, skipping ---\n",
+                       algo, size, nbytes);
+            MPI_Finalize();
+            return 0;
+        }
+
+        /* 2. Which per-root JSONs already exist? */
+        int *root_done = calloc(size, sizeof(int));
+        int n_existing = 0;
+        if (rank == 0) {
+            for (int r = 0; r < size; r++) {
+                char rp[4096];
+                snprintf(rp, sizeof(rp),
+                         "%s/N%d_MSG%d_R%d.json",
+                         sweep_outdir, size, nbytes, r);
+                root_done[r] = file_exists(rp);
+                n_existing += root_done[r];
+            }
+        }
+        MPI_Bcast(root_done, size, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&n_existing, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+        int n_todo = size - n_existing;
+        if (rank == 0) {
+            if (n_existing > 0)
+                printf("--- %s N=%d MSG=%d: %d/%d roots cached, running %d ---\n",
+                       algo, size, nbytes, n_existing, size, n_todo);
+            else
+                printf("--- %s N=%d MSG=%d: running all %d roots ---\n",
+                       algo, size, nbytes, size);
+        }
+
+        /* 3. Run missing roots */
+        char *buf = calloc(nbytes, 1);
+
+        for (int r = 0; r < size; r++) {
+            if (root_done[r]) continue;
+
+            /* Reset buffer; root fills with known pattern */
+            memset(buf, 0, nbytes);
+            if (rank == r)
+                for (int i = 0; i < nbytes; i++)
+                    buf[i] = (char)(i & 0xFF);
+
+            MPI_Barrier(MPI_COMM_WORLD);
+
+            double elapsed = 0.0;
+            switch (algo_id) {
+            case 0: elapsed = run_mpi_bcast(buf, nbytes, r);                    break;
+            case 1: elapsed = run_srda(buf, nbytes, rank, size, r);             break;
+            case 2: elapsed = run_pipe(buf, nbytes, rank, size, r, nchunks);    break;
+            case 3: { int nc2 = nchunks;
+                      elapsed = run_test(buf, nbytes, rank, size, r, topo_file,
+                                         &nc2);                                 break; }
+            case 4: elapsed = run_bine(buf, nbytes, rank, size, r);             break;
+            case 5: elapsed = run_glf(buf, nbytes, rank, size, r, topo_file);   break;
+            case 6: elapsed = run_ffgb(buf, nbytes, rank, size, r, topo_file);  break;
+            case 7: elapsed = run_obfs(buf, nbytes, rank, size, r, topo_file,
+                                       nchunks);                                break;
+            case 8: elapsed = run_bbs(buf, nbytes, rank, size, r, topo_file,
+                                      nchunks);                                 break;
+            }
+
+            /* Verify */
+            int ok = 1;
+            for (int i = 0; i < nbytes; i++)
+                if (buf[i] != (char)(i & 0xFF)) { ok = 0; break; }
+
+            double max_time;
+            MPI_Reduce(&elapsed, &max_time, 1, MPI_DOUBLE, MPI_MAX,
+                       0, MPI_COMM_WORLD);
+            int all_ok;
+            MPI_Reduce(&ok, &all_ok, 1, MPI_INT, MPI_MIN,
+                       0, MPI_COMM_WORLD);
+
+            /* Write per-root JSON immediately (crash recovery checkpoint) */
+            if (rank == 0) {
+                char rp[4096];
+                snprintf(rp, sizeof(rp),
+                         "%s/N%d_MSG%d_R%d.json",
+                         sweep_outdir, size, nbytes, r);
+                FILE *jfp = fopen(rp, "w");
+                if (jfp) {
+                    fprintf(jfp,
+                        "{\n"
+                        "  \"algorithm\": \"%s\",\n"
+                        "  \"nodes\": %d,\n"
+                        "  \"msg_bytes\": %d,\n"
+                        "  \"nchunks\": %d,\n"
+                        "  \"root\": %d,\n"
+                        "  \"time_sec\": %.9f,\n"
+                        "  \"correct\": %s\n"
+                        "}\n",
+                        algo, size, nbytes, reported_nchunks, r, max_time,
+                        all_ok ? "true" : "false");
+                    fclose(jfp);
+                }
+            }
+
+            MPI_Barrier(MPI_COMM_WORLD);
+        }
+
+        free(buf);
+
+        /* 4. Aggregate all per-root JSONs → bulk JSON */
+        if (rank == 0) {
+            double *atimes = calloc(size, sizeof(double));
+            int correct = 1, any_missing = 0;
+
+            for (int r = 0; r < size; r++) {
+                char rp[4096];
+                snprintf(rp, sizeof(rp),
+                         "%s/N%d_MSG%d_R%d.json",
+                         sweep_outdir, size, nbytes, r);
+                double t; int ok;
+                if (parse_root_json(rp, &t, &ok) != 0) {
+                    fprintf(stderr,
+                        "ERROR: missing %s — cannot aggregate\n", rp);
+                    any_missing = 1;
+                    break;
+                }
+                atimes[r] = t;
+                if (!ok) correct = 0;
+            }
+
+            if (!any_missing) {
+                double sum = 0, mn = atimes[0], mx = atimes[0];
+                for (int i = 0; i < size; i++) {
+                    sum += atimes[i];
+                    if (atimes[i] < mn) mn = atimes[i];
+                    if (atimes[i] > mx) mx = atimes[i];
+                }
+                double mean = sum / size;
+                double sum2 = 0;
+                for (int i = 0; i < size; i++)
+                    sum2 += (atimes[i] - mean) * (atimes[i] - mean);
+                double stdev = sqrt(sum2 / size);
+
+                FILE *jfp = fopen(bulk_path, "w");
+                if (jfp) {
+                    fprintf(jfp,
+                        "{\n"
+                        "  \"algorithm\": \"%s\",\n"
+                        "  \"nodes\": %d,\n"
+                        "  \"msg_bytes\": %d,\n"
+                        "  \"nchunks\": %d,\n"
+                        "  \"n_roots\": %d,\n"
+                        "  \"mean_sec\": %.9e,\n"
+                        "  \"stdev_sec\": %.9e,\n"
+                        "  \"min_sec\": %.9e,\n"
+                        "  \"max_sec\": %.9e,\n"
+                        "  \"correct\": %s,\n"
+                        "  \"per_root_sec\": [",
+                        algo, size, nbytes, reported_nchunks,
+                        size, mean, stdev, mn, mx,
+                        correct ? "true" : "false");
+                    for (int i = 0; i < size; i++)
+                        fprintf(jfp, "%s%.9e",
+                                i ? ", " : "", atimes[i]);
+                    fprintf(jfp, "]\n}\n");
+                    fclose(jfp);
+                }
+
+                /* 5. Cleanup per-root files */
+                for (int r = 0; r < size; r++) {
+                    char rp[4096];
+                    snprintf(rp, sizeof(rp),
+                             "%s/N%d_MSG%d_R%d.json",
+                             sweep_outdir, size, nbytes, r);
+                    remove(rp);
+                }
+
+                printf("  %s N=%d MSG=%d: mean=%.6e max=%.6e max/min=%.1fx %s\n",
+                       algo, size, nbytes, mean, mx, mx / mn,
+                       correct ? "OK" : "FAIL");
+            }
+
+            free(atimes);
+        }
+
+        free(root_done);
+        MPI_Finalize();
+        return 0;
+    }
+
+    /* ---- Root loop (single root / all-roots mode) ---- */
     int root_lo = all_roots ? 0 : root;
     int root_hi = all_roots ? size - 1 : root;
     int nroots  = root_hi - root_lo + 1;
@@ -2222,6 +3024,8 @@ int main(int argc, char **argv)
         case 4: elapsed = run_bine(buf, nbytes, rank, size, r);              break;
         case 5: elapsed = run_glf(buf, nbytes, rank, size, r, topo_file);    break;
         case 6: elapsed = run_ffgb(buf, nbytes, rank, size, r, topo_file);   break;
+        case 7: elapsed = run_obfs(buf, nbytes, rank, size, r, topo_file, nchunks); break;
+        case 8: elapsed = run_bbs(buf, nbytes, rank, size, r, topo_file, nchunks);  break;
         }
 
         /* ---- Verify ---- */

@@ -64,7 +64,7 @@ ALGO_STYLE = {
 }
 
 TOPOLOGY_LABEL = {
-    "2Dmesh":    "2-D Mesh",
+    "2Dmesh":    "2D Mesh",
     "Butterfly": "Butterfly",
     "Dragonfly": "Dragonfly",
     "FatTree":   "Fat-Tree",
