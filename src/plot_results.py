@@ -50,7 +50,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 FIGS = ROOT / "figs"
 
-ALGORITHMS = ["bine", "glf", "pipe", "srda", "mpi"]
+ALGORITHMS = ["bine", "glf", "pipe", "srda", "mpi", "bbs"]
 
 # Metallic palette — vivid, shiny tones
 #   Metallic red, metallic blue, metallic green, metallic gold, metallic purple
@@ -58,9 +58,10 @@ ALGO_STYLE = {
     #          label        color      marker  ls     ecolor (deeper shade)
     "bine": ("BInE",      "#CD2032", "o",    "-",   "#9A1624"),
     "glf":  ("GLF",       "#1560BD", "s",    "-",   "#0E4382"),
-    "pipe": ("Pipeline",  "#1FAD3F", "^",    "-",   "#14762B"),
+    "bbs": ("BBS",  "#1FAD3F", "^",    "-",   "#14762B"),
     "srda": ("SRDA",      "#DAA520", "D",    "-",   "#A07B18"),
     "mpi":  ("MPI_Bcast", "#8B45A6", "v",    "-",  "#5E2E71"),
+    "pipe":  ("Pipeline",       "#E05500", "P",    "-",  "#A03D00"),
 }
 
 TOPOLOGY_LABEL = {
@@ -104,7 +105,7 @@ def load_data(topology, algorithm, N):
     """Return sorted arrays (msg_bytes, mean, stdev) for one series."""
     d = DATA / topology / algorithm
     if not d.is_dir():
-        return None, None, None
+        return None, None
 
     msgs, means = [], []
     for f in sorted(d.glob(f"N{N}_MSG*.json")):

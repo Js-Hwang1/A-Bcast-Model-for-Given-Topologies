@@ -16,3 +16,10 @@ __pycache__/
 *.log
 *.out
 *.png
+simgrid/
+data/
+trace/
+figs/
+seawulf/
+topo/
+encodings/

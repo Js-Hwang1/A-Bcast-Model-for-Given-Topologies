@@ -14,6 +14,8 @@
 #   ./sweep.sh --roots lo             # roots 0..N/2-1
 #   ./sweep.sh --roots hi             # roots N/2..N-1
 #   ./sweep.sh --roots 5              # just root 5
+#   ./sweep.sh --roots 0-127          # roots 0 through 127
+#   ./sweep.sh --roots 128-255        # roots 128 through 255
 #   ./sweep.sh -j 8                   # limit to 8 workers
 #   ./sweep.sh --dry-run              # list commands, don't execute
 #   ./sweep.sh --algos mpi,srda       # specific algorithms
@@ -39,15 +41,18 @@ HOST_SPEED="2000Gf"
 # ---- Default parameter space ----
 TOPOS=(2Dmesh Butterfly Dragonfly FatTree)
 SIZES=(128 256 512 1024)
-ALGOS=(mpi srda pipe bine glf ffgb)
-MSG_SIZES=(256 1024 4096 16384 65536 262144 1048576 4194304 16777216 67108864)
+ALGOS=(mpi srda pipe bine glf obfs bbs)
+MSG_SIZES=(65536 262144 1048576 4194304 16777216 67108864)
 
 # ---- Defaults ----
 JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 DRY_RUN=0
 SIF=""
-ROOT_MODE="single"   # single | all | lo | hi
+ROOT_MODE="single"   # single | all | lo | hi | range
 ROOT_SINGLE=0
+ROOT_LO=0
+ROOT_HI=0
+CHUNKS_OVERRIDE=""
 
 # ---- Parse CLI ----
 while [[ $# -gt 0 ]]; do
@@ -58,12 +63,14 @@ while [[ $# -gt 0 ]]; do
         --topos)      IFS=',' read -ra TOPOS <<< "$2"; shift 2 ;;
         --sizes)      IFS=',' read -ra SIZES <<< "$2"; shift 2 ;;
         --msgs)       IFS=',' read -ra MSG_SIZES <<< "$2"; shift 2 ;;
+        --chunks)     CHUNKS_OVERRIDE="$2"; shift 2 ;;
         --sif)        SIF="$2"; shift 2 ;;
         --roots)
             case "$2" in
                 all) ROOT_MODE="all" ;;
                 lo)  ROOT_MODE="lo" ;;
                 hi)  ROOT_MODE="hi" ;;
+                *-*) ROOT_MODE="range"; ROOT_LO="${2%%-*}"; ROOT_HI="${2##*-}" ;;
                 *)   ROOT_MODE="single"; ROOT_SINGLE="$2" ;;
             esac
             shift 2 ;;
@@ -83,6 +90,7 @@ root_range() {
         all)    seq 0 $(( n - 1 )) ;;
         lo)     seq 0 $(( n / 2 - 1 )) ;;
         hi)     seq $(( n / 2 )) $(( n - 1 )) ;;
+        range)  seq "$ROOT_LO" "$ROOT_HI" ;;
     esac
 }
 
@@ -101,6 +109,8 @@ fi
 # ---- Helpers ----
 mesh_dims() {
     case "$1" in
+        32)   echo "4x8"   ;;
+        36)   echo "6x6"   ;;
         128)  echo "8x16"  ;;
         256)  echo "16x16" ;;
         512)  echo "16x32" ;;
@@ -149,7 +159,7 @@ fi
 # ---- Preprocess XML -> .tdat for test algorithm ----
 needs_tdat=0
 for _algo in "${ALGOS[@]}"; do
-    [[ "$_algo" == "test" || "$_algo" == "ffgb" ]] && needs_tdat=1
+    [[ "$_algo" == "test" || "$_algo" == "ffgb" || "$_algo" == "obfs" || "$_algo" == "bbs" ]] && needs_tdat=1
 done
 if [[ $needs_tdat -eq 1 ]]; then
     PREPROCESS="$SCRIPT_DIR/topo_preprocess.py"
@@ -182,11 +192,11 @@ for TOPO in "${TOPOS[@]}"; do
 
         for ALGO in "${ALGOS[@]}"; do
             for MSG in "${MSG_SIZES[@]}"; do
-                NC=$(choose_chunks "$MSG")
+                NC=${CHUNKS_OVERRIDE:-$(choose_chunks "$MSG")}
 
                 if [[ "$ROOT_MODE" == "all" ]]; then
                     # Bulk mode: single smpirun with root=all
-                    # Avoids per-root MPI_Init overhead (128x fewer launches)
+                    # Much faster — one MPI_Init for all roots
                     OUTJSON="$DATA_DIR/$TOPO/$ALGO/N${N}_MSG${MSG}.json"
                     OUTDIR=$(dirname "$OUTJSON")
 
@@ -195,10 +205,11 @@ for TOPO in "${TOPOS[@]}"; do
                     CMD+=" -platform $PLATFORM"
                     CMD+=" -hostfile $HOSTFILE"
                     CMD+=" --cfg=smpi/host-speed:$HOST_SPEED"
+                    CMD+=" --cfg=smpi/simulate-computation:no"
                     CMD+=" --cfg=smpi/display-timing:yes"
                     CMD+=" --log=root.thres:warning"
                     CMD+=" $BINARY $ALGO $MSG $NC all $OUTJSON"
-                    if [[ "$ALGO" == "test" || "$ALGO" == "ffgb" ]]; then
+                    if [[ "$ALGO" == "test" || "$ALGO" == "ffgb" || "$ALGO" == "obfs" || "$ALGO" == "bbs" ]]; then
                         CMD+=" $(topo_data_path "$TOPO" "$N")"
                     elif [[ "$ALGO" == "glf" ]]; then
                         CMD+=" $(topo_cfg_path "$TOPO" "$N")"
@@ -218,6 +229,7 @@ for TOPO in "${TOPOS[@]}"; do
                         CMD+=" -platform $PLATFORM"
                         CMD+=" -hostfile $HOSTFILE"
                         CMD+=" --cfg=smpi/host-speed:$HOST_SPEED"
+                        CMD+=" --cfg=smpi/simulate-computation:no"
                         CMD+=" --cfg=smpi/display-timing:yes"
                         CMD+=" --log=root.thres:warning"
 
@@ -230,7 +242,7 @@ for TOPO in "${TOPOS[@]}"; do
                         fi
 
                         CMD+=" $BINARY $ALGO $MSG $NC $ROOT $OUTJSON"
-                        if [[ "$ALGO" == "test" ]]; then
+                        if [[ "$ALGO" == "test" || "$ALGO" == "ffgb" || "$ALGO" == "obfs" || "$ALGO" == "bbs" ]]; then
                             CMD+=" $(topo_data_path "$TOPO" "$N")"
                         elif [[ "$ALGO" == "glf" ]]; then
                             CMD+=" $(topo_cfg_path "$TOPO" "$N")"
@@ -304,37 +316,116 @@ else
     echo "(Install GNU parallel for progress bars and job logging)"
     echo ""
 
+    # Collect PIDs and job labels
+    PIDS=()
+    LABELS=()
     RUNNING=0
+
+    # Helper: format elapsed / ETA as human-readable
+    fmt_time() {
+        local s=$1
+        if (( s >= 3600 )); then
+            printf "%dh%02dm" $((s/3600)) $(((s%3600)/60))
+        elif (( s >= 60 )); then
+            printf "%dm%02ds" $((s/60)) $((s%60))
+        else
+            printf "%ds" "$s"
+        fi
+    }
+
+    # Helper: print completion line with ETA
+    print_progress() {
+        local NOW ELAPSED ETA_S ETA_STR
+        NOW=$(date +%s)
+        ELAPSED=$((NOW - START_TIME))
+        if (( COMPLETED > 0 && ELAPSED > 0 )); then
+            ETA_S=$(( (NJOBS - COMPLETED) * ELAPSED / COMPLETED ))
+            ETA_STR=$(fmt_time $ETA_S)
+        else
+            ETA_STR="?"
+        fi
+        local STATUS_TAG=""
+        (( FAILED > 0 )) && STATUS_TAG="  ${FAILED} failed"
+        printf "  [%d/%d] %-50s  elapsed=%-8s ETA=%s%s\n" \
+            "$COMPLETED" "$NJOBS" "$1" "$(fmt_time $ELAPSED)" "$ETA_STR" "$STATUS_TAG"
+    }
+
     while IFS= read -r CMD; do
+        # Extract a short label from the command (algo + msg + root info)
+        LABEL=$(echo "$CMD" | sed -n 's/.*runner \([a-z]*\) \([0-9]*\) [0-9]* \([^ ]*\) .*/\1 MSG=\2 root=\3/p')
+        [[ -z "$LABEL" ]] && LABEL="job $((${#PIDS[@]}+1))"
+
         bash -c "$CMD" > /dev/null 2>&1 &
+        PIDS+=($!)
+        LABELS+=("$LABEL")
         RUNNING=$((RUNNING + 1))
 
         if (( RUNNING >= JOBS )); then
-            if wait -n 2>/dev/null; then
-                COMPLETED=$((COMPLETED + 1))
-            else
-                COMPLETED=$((COMPLETED + 1))
-                FAILED=$((FAILED + 1))
-            fi
+            wait "${PIDS[COMPLETED]}" 2>/dev/null
+            STATUS=$?
+            COMPLETED=$((COMPLETED + 1))
             RUNNING=$((RUNNING - 1))
-            printf "\r  [%d/%d] completed (%d failed)" \
-                "$COMPLETED" "$NJOBS" "$FAILED"
+            (( STATUS != 0 )) && FAILED=$((FAILED + 1))
+            print_progress "${LABELS[$((COMPLETED-1))]}"
         fi
     done < "$JOBFILE"
 
-    while (( RUNNING > 0 )); do
-        if wait -n 2>/dev/null; then
-            COMPLETED=$((COMPLETED + 1))
-        else
-            COMPLETED=$((COMPLETED + 1))
-            FAILED=$((FAILED + 1))
-        fi
+    # Drain remaining jobs
+    while (( COMPLETED < NJOBS )); do
+        wait "${PIDS[COMPLETED]}" 2>/dev/null
+        STATUS=$?
+        COMPLETED=$((COMPLETED + 1))
         RUNNING=$((RUNNING - 1))
-        printf "\r  [%d/%d] completed (%d failed)" \
-            "$COMPLETED" "$NJOBS" "$FAILED"
+        (( STATUS != 0 )) && FAILED=$((FAILED + 1))
+        print_progress "${LABELS[$((COMPLETED-1))]}"
     done
     echo ""
 fi
+
+# ---- Aggregate per-root JSONs into bulk JSONs for plotting ----
+echo "Aggregating per-root JSONs..."
+for TOPO in "${TOPOS[@]}"; do
+    for N in "${SIZES[@]}"; do
+        for ALGO in "${ALGOS[@]}"; do
+            for MSG in "${MSG_SIZES[@]}"; do
+                OUTDIR="$DATA_DIR/$TOPO/$ALGO"
+                BULK="$OUTDIR/N${N}_MSG${MSG}.json"
+                [[ -f "$BULK" ]] && continue
+
+                # Check if all per-root JSONs exist
+                ALL_EXIST=1
+                for ((r=0; r<N; r++)); do
+                    [[ ! -f "$OUTDIR/N${N}_MSG${MSG}_R${r}.json" ]] && ALL_EXIST=0 && break
+                done
+                (( ALL_EXIST == 0 )) && continue
+
+                NC=${CHUNKS_OVERRIDE:-$(choose_chunks "$MSG")}
+                python3 -c "
+import json, math
+N, outdir, msg, algo, nc = $N, '$OUTDIR', $MSG, '$ALGO', $NC
+times, ok = [], True
+for r in range(N):
+    with open(f'{outdir}/N{N}_MSG{msg}_R{r}.json') as f:
+        rec = json.load(f)
+    times.append(rec['time_sec'])
+    if not rec.get('correct', True): ok = False
+mean = sum(times)/N
+stdev = math.sqrt(sum((t-mean)**2 for t in times)/N)
+bulk = {'algorithm':algo,'nodes':N,'msg_bytes':msg,'nchunks':nc,
+        'n_roots':N,'mean_sec':mean,'stdev_sec':stdev,
+        'min_sec':min(times),'max_sec':max(times),
+        'correct':ok,'per_root_sec':times}
+with open('$BULK','w') as f: json.dump(bulk,f,indent=2)
+print(f'  {algo} N={N} MSG={msg}: mean={mean*1e6:.1f}us  min={min(times)*1e6:.1f}us  max={max(times)*1e6:.1f}us')
+" 2>/dev/null && \
+                # Clean up per-root files
+                for ((r=0; r<N; r++)); do
+                    rm -f "$OUTDIR/N${N}_MSG${MSG}_R${r}.json"
+                done
+            done
+        done
+    done
+done
 
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))

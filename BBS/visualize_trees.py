@@ -13,7 +13,7 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from collections import deque
+from collections import deque, Counter
 
 
 # ── Build 2D mesh topology data ──────────────────────────────────────
@@ -155,7 +155,16 @@ BBS_MAX_TREES = 8
 
 def bbs_compute_trees(N, adj, lat, flink, path_len, path_links, max_hops,
                       root):
-    """Exact port of encode.c bbs_compute_trees().
+    """Build spanning trees via round-robin BFS with a shared edge pool.
+
+    Algorithm:
+        tau = 3 trees, each edge may be used by at most max_usage = 2 trees.
+        All trees grow simultaneously: in round-robin order, each tree
+        pops one node from its BFS frontier and expands all available
+        neighbors (edges with usage < max_usage). Edge usage is updated
+        globally after each expansion, so all trees see the same pool.
+
+    Fully deterministic — no sorting, no randomness.
 
     Returns:
         tau     : number of trees
@@ -208,172 +217,277 @@ def bbs_compute_trees(N, adj, lat, flink, path_len, path_links, max_hops,
             qt += 1
     depth0 = tree_depth(t0_bfs, N)
 
-    # ---- Determine tau from root degree ----
-    nw_bound = total_edges // (N - 1) if N > 1 else 0
-    tau = root_nn
-    if tau > BBS_MAX_TREES:
-        tau = BBS_MAX_TREES
-    if tau < 1:
-        tau = 1
+    # ---- Parameters ----
+    tau = 3
+    max_usage = 2
 
-    # ---- Find max flink ID and count distinct root flinks ----
+    # ---- Find max flink ID ----
     max_fl = int(np.max(flink)) + 2
 
-    root_distinct_fl = 0
-    seen_fl = []
-    for i in range(root_nn):
-        fl = flink[root, root_nbrs[i]]
-        if fl not in seen_fl:
-            seen_fl.append(fl)
-            root_distinct_fl += 1
+    print(f"BBS: edges={total_edges} root_deg={root_nn} "
+          f"tau={tau} max_usage={max_usage} "
+          f"baseline_depth={depth0}")
 
-    print(f"BBS: edges={total_edges} root_deg={root_nn} NW={nw_bound} "
-          f"root_flinks={root_distinct_fl} max_fl={max_fl} "
-          f"-> trying tau={tau} (baseline_depth={depth0})")
-
-    if tau < 2:
-        print("BBS: tau=1 (root degree < 2)")
+    if root_nn < 1:
+        print("BBS: isolated root, returning single BFS tree")
         return 1, [t0_bfs]
 
-    # ---- Flink usage tracking ----
-    flink_used = [0] * max_fl
+    # ---- Global edge pool ----
+    edge_usage = [0] * max_fl
 
-    # ---- Build tau trees with flink-aware two-pass BFS ----
-    trees = []
-    has_path_data = (max_hops > 0 and path_len is not None
-                     and path_links is not None)
+    # ---- Identify low-degree nodes (corners) — only ingoing allowed ----
+    # For nodes with degree <= 2, their edge budget is too tight to be
+    # parents of other nodes. Only allow them as children (ingoing edges).
+    node_degree = [0] * N
+    for i in range(N):
+        for j in range(N):
+            if adj_1hop[i, j]:
+                node_degree[i] += 1
+    # Nodes that cannot serve as parents (except root):
+    # Corner nodes (degree <= 2) have tight edge budgets — all their
+    # edge capacity is needed for their own parent assignments.
+    no_parent = set()
+    for i in range(N):
+        if i == root:
+            continue
+        if node_degree[i] <= 2:
+            no_parent.add(i)
 
-    for t in range(tau):
-        tree = [-1] * N
-        visited = [False] * N
-        visited[root] = True
-        queue = [0] * (N + 1)
-        qh, qt = 0, 0
-        queue[qt] = root
-        qt += 1
+    # ---- Compute BFS order from root ----
+    bfs_order = []
+    bfs_vis = [False] * N
+    bfs_vis[root] = True
+    bfs_q = deque([root])
+    while bfs_q:
+        u = bfs_q.popleft()
+        bfs_order.append(u)
+        for v in range(N):
+            if not bfs_vis[v] and adj_1hop[u, v]:
+                bfs_vis[v] = True
+                bfs_q.append(v)
 
-        # Seed: root neighbors at indices t, t+tau, t+2*tau, ...
-        for i in range(t, root_nn, tau):
-            v = root_nbrs[i]
-            if not visited[v]:
-                visited[v] = True
-                tree[v] = root
-                queue[qt] = v
-                qt += 1
+    # ---- Assign parents with constraint propagation ----
+    # For each node in BFS order, assign a parent in each of the 3 trees.
+    # The starting tree rotates per node (round-robin fairness).
+    #
+    # Each pass has two phases:
+    #   Phase A (propagation): repeatedly assign pairs that have exactly
+    #     one viable parent — these are forced and must be done first to
+    #     avoid greedy choices consuming critical edges.
+    #   Phase B (greedy): for pairs with 2+ options, pick lowest-usage
+    #     edge, tie-break by lowest node ID.
+    # Deferred pairs (no options yet) are retried in the next pass.
+    trees = [[-1] * N for _ in range(tau)]
 
-        # Two-pass BFS for full-path disjointness
-        qh = 1  # skip root
-        if has_path_data:
-            # Pass 1: BFS using only path-disjoint edges
-            mh = max_hops
-            while qh < qt:
-                u = queue[qh]
-                qh += 1
-                for v in range(N):
-                    if visited[v] or not adj_1hop[u, v]:
-                        continue
-                    # Check if ANY link on path(u,v) is already used
-                    plen = path_len[u, v]
-                    conflict = False
-                    for h in range(plen):
-                        lid = path_links[u, v, h]
-                        if lid > 0 and lid < max_fl and flink_used[lid] > 0:
-                            conflict = True
-                            break
-                    if conflict:
-                        continue
-                    visited[v] = True
-                    tree[v] = u
-                    queue[qt] = v
-                    qt += 1
+    # Build initial work list with round-robin tree ordering per node
+    unassigned = []
+    node_idx = 0
+    for v in bfs_order:
+        if v == root:
+            continue
+        start_t = node_idx % tau
+        for offset in range(tau):
+            t = (start_t + offset) % tau
+            unassigned.append((v, t))
+        node_idx += 1
 
-            # Pass 2: fill remaining via any adjacency edge
-            qi = 0
-            while qi < qt:
-                u = queue[qi]
-                qi += 1
-                for v in range(N):
-                    if visited[v] or not adj_1hop[u, v]:
-                        continue
-                    visited[v] = True
-                    tree[v] = u
-                    queue[qt] = v
-                    qt += 1
-        else:
-            # Fallback: standard BFS (no path data)
-            while qh < qt:
-                u = queue[qh]
-                qh += 1
-                for v in range(N):
-                    if visited[v] or not adj_1hop[u, v]:
-                        continue
-                    visited[v] = True
-                    tree[v] = u
-                    queue[qt] = v
-                    qt += 1
-
-        # ---- Bridge disconnected components via latency ----
-        while qt < N:
-            bv, bu = -1, -1
-            best = 1e30
-            for v in range(N):
-                if visited[v]:
-                    continue
-                for u in range(N):
-                    if not visited[u]:
-                        continue
-                    l = lat[u, v]
-                    if l > 0.0 and l < best:
-                        best = l
-                        bu = u
-                        bv = v
-            if bv < 0:
-                break
-            visited[bv] = True
-            tree[bv] = bu
-            queue[qt] = bv
-            qt += 1
-
-        # ---- Mark ALL links on this tree's edge paths as used ----
-        links_fresh, links_shared = 0, 0
-        for i in range(N):
-            if tree[i] < 0:
+    def find_options(v, t):
+        """Return list of (parent, edge_usage) for viable parents."""
+        opts = []
+        for u in range(N):
+            if not adj_1hop[v, u]:
                 continue
-            p = tree[i]
-            if has_path_data:
-                mh = max_hops
-                plen = path_len[p, i]
-                for h in range(plen):
-                    lid = path_links[p, i, h]
-                    if lid > 0 and lid < max_fl:
-                        if flink_used[lid] == 0:
-                            links_fresh += 1
-                        else:
-                            links_shared += 1
-                        flink_used[lid] += 1
+            if u != root and trees[t][u] < 0:
+                continue
+            if u in no_parent:
+                continue  # low-degree nodes can't be parents
+            fl = int(flink[v, u])
+            if 0 < fl < max_fl and edge_usage[fl] >= max_usage:
+                continue
+            usage = edge_usage[fl] if 0 < fl < max_fl else 0
+            opts.append((u, usage))
+        return opts
+
+    def assign(v, t, parent):
+        trees[t][v] = parent
+        fl = int(flink[v, parent])
+        if 0 < fl < max_fl:
+            edge_usage[fl] += 1
+
+    for pass_num in range(N):
+        if not unassigned:
+            break
+
+        # Phase A: constraint propagation — assign forced pairs
+        changed = True
+        while changed:
+            changed = False
+            remaining = []
+            for v, t in unassigned:
+                opts = find_options(v, t)
+                if len(opts) == 1:
+                    assign(v, t, opts[0][0])
+                    changed = True
+                elif len(opts) == 0:
+                    remaining.append((v, t))
+                else:
+                    remaining.append((v, t))
+            unassigned = remaining
+
+        # Phase B: greedy assignment for pairs with 2+ options
+        new_unassigned = []
+        progress = False
+        for v, t in unassigned:
+            opts = find_options(v, t)
+            if opts:
+                # Pick lowest usage, then lowest node ID
+                best = min(opts, key=lambda x: (x[1], x[0]))
+                assign(v, t, best[0])
+                progress = True
             else:
-                fl = flink[p, i]
-                if fl > 0 and fl < max_fl:
-                    if flink_used[fl] == 0:
-                        links_fresh += 1
-                    else:
-                        links_shared += 1
-                    flink_used[fl] += 1
+                new_unassigned.append((v, t))
 
-        print(f"BBS:   T{t}: {links_fresh} fresh links, "
-              f"{links_shared} shared links")
-        trees.append(tree)
+        if not progress and not new_unassigned != unassigned:
+            # Check if propagation alone made progress
+            if len(new_unassigned) == len(unassigned):
+                break
+        unassigned = new_unassigned
 
-    # ---- Compute depths and stats ----
-    max_depth = 0
-    depth_str = "BBS: tree depths:"
+    # ---- Repair step: reparent to free saturated edges ----
+    # Two-level repair: first try direct reparenting (1-deep),
+    # then try chain reparenting (2-deep: free an edge for a victim
+    # by reparenting one of victim's neighbors first).
+    for repair_depth in range(2):
+        if not unassigned:
+            break
+        still_unassigned = []
+        for v, t in unassigned:
+            resolved = False
+            for u in range(N):
+                if resolved:
+                    break
+                if not adj_1hop[v, u]:
+                    continue
+                fl = int(flink[v, u])
+                if fl <= 0 or fl >= max_fl or edge_usage[fl] < max_usage:
+                    continue
+                if not (u == root or trees[t][u] >= 0):
+                    continue
+                for t2 in range(tau):
+                    if t2 == t or resolved:
+                        continue
+                    victims = []
+                    for w in range(N):
+                        if trees[t2][w] < 0:
+                            continue
+                        if int(flink[w, trees[t2][w]]) == fl:
+                            victims.append(w)
+                    for victim in victims:
+                        if resolved:
+                            break
+                        old_parent = trees[t2][victim]
+                        # Try direct reparent
+                        for alt in range(N):
+                            if alt == old_parent or not adj_1hop[victim, alt]:
+                                continue
+                            if alt != root and trees[t2][alt] < 0:
+                                continue
+                            is_desc = False
+                            a = alt
+                            while a >= 0 and a != root:
+                                if a == victim:
+                                    is_desc = True
+                                    break
+                                a = trees[t2][a]
+                            if is_desc:
+                                continue
+                            alt_fl = int(flink[victim, alt])
+                            if 0 < alt_fl < max_fl and edge_usage[alt_fl] >= max_usage:
+                                # Depth-2: try freeing alt_fl first
+                                if repair_depth < 1:
+                                    continue
+                                # Find who uses alt_fl in another tree
+                                freed = False
+                                for t3 in range(tau):
+                                    if t3 == t2 or freed:
+                                        continue
+                                    for w2 in range(N):
+                                        if freed:
+                                            break
+                                        if trees[t3][w2] < 0:
+                                            continue
+                                        if int(flink[w2, trees[t3][w2]]) != alt_fl:
+                                            continue
+                                        old_p2 = trees[t3][w2]
+                                        for alt2 in range(N):
+                                            if alt2 == old_p2 or not adj_1hop[w2, alt2]:
+                                                continue
+                                            if alt2 != root and trees[t3][alt2] < 0:
+                                                continue
+                                            is_d2 = False
+                                            a2 = alt2
+                                            while a2 >= 0 and a2 != root:
+                                                if a2 == w2:
+                                                    is_d2 = True
+                                                    break
+                                                a2 = trees[t3][a2]
+                                            if is_d2:
+                                                continue
+                                            alt2_fl = int(flink[w2, alt2])
+                                            if 0 < alt2_fl < max_fl and edge_usage[alt2_fl] >= max_usage:
+                                                continue
+                                            # Chain reparent: w2 in t3, then victim in t2
+                                            trees[t3][w2] = alt2
+                                            edge_usage[alt_fl] -= 1
+                                            if 0 < alt2_fl < max_fl:
+                                                edge_usage[alt2_fl] += 1
+                                            freed = True
+                                            break
+                                if not freed:
+                                    continue
+                            # Now alt_fl has budget; reparent victim
+                            trees[t2][victim] = alt
+                            edge_usage[fl] -= 1
+                            if 0 < alt_fl < max_fl:
+                                edge_usage[alt_fl] += 1
+                            trees[t][v] = u
+                            edge_usage[fl] += 1
+                            resolved = True
+                            break
+            if not resolved:
+                still_unassigned.append((v, t))
+        unassigned = still_unassigned
+
+    if unassigned:
+        print(f"BBS: WARNING: {len(unassigned)} unresolved (node,tree) pairs")
+        for v, t in unassigned:
+            nbrs = [u for u in range(N) if adj_1hop[v, u]]
+            print(f"  stuck: node={v} tree={t} neighbors={nbrs}")
+
+    # ---- Per-tree stats ----
     for t in range(tau):
+        tree_lids = set()
+        for i in range(N):
+            if trees[t][i] < 0:
+                continue
+            fl = int(flink[trees[t][i], i])
+            if 0 < fl < max_fl:
+                tree_lids.add(fl)
+        excl = sum(1 for fl in tree_lids if edge_usage[fl] == 1)
+        shared = len(tree_lids) - excl
         d = tree_depth(trees[t], N)
         rc = sum(1 for i in range(N) if trees[t][i] == root)
-        depth_str += f" T{t}={d}(rc={rc})"
-        if d > max_depth:
-            max_depth = d
-    print(depth_str)
+        print(f"BBS:   T{t}: depth={d} rc={rc} "
+              f"exclusive={excl} shared={shared}")
+
+    # ---- Link sharing distribution ----
+    sharing_dist = Counter(c for c in edge_usage if c > 0)
+    max_sharing = max(edge_usage) if max_fl > 1 else 0
+    print(f"BBS: Link sharing: {dict(sorted(sharing_dist.items()))} "
+          f"max={max_sharing}")
+
+    # ---- Compute depths ----
+    max_depth = max(tree_depth(trees[t], N) for t in range(tau))
 
     # ---- Count flink collisions between tree pairs ----
     flink_collisions = 0
@@ -397,23 +511,6 @@ def bbs_compute_trees(N, adj, lat, flink, path_len, path_links, max_hops,
 
     print(f"BBS: tau={tau} max_depth={max_depth} baseline={depth0} "
           f"flink_collisions={flink_collisions}")
-
-    # ---- Fallback: if max depth > 2x baseline, reduce tau ----
-    while tau > 1 and max_depth > 2 * depth0:
-        tau -= 1
-        print(f"BBS: max_depth {max_depth} > 2*baseline {depth0}, "
-              f"reducing to tau={tau}")
-        max_depth = 0
-        for t in range(tau):
-            d = tree_depth(trees[t], N)
-            if d > max_depth:
-                max_depth = d
-
-    if tau == 1:
-        trees = [t0_bfs]
-        print("BBS: fallback to tau=1 (baseline BFS)")
-    else:
-        trees = trees[:tau]
 
     # ---- Verify all trees are spanning ----
     for t in range(tau):
