@@ -1,0 +1,66 @@
+<?xml version='1.0'?>
+<!DOCTYPE platform SYSTEM "https://simgrid.org/simgrid.dtd">
+<platform version="4.1">
+
+  <!-- Fat-Tree: 8 nodes, 2 leaf switches, 2 spine switches -->
+  <!-- Nodes 0-3 on leaf-0, nodes 4-7 on leaf-1 -->
+  <!-- Each leaf connects to both spines (full bipartite) -->
+  <!-- NIC links: 12.5 GBps, 100 ns -->
+  <!-- Leaf-spine links: 12.5 GBps, 100 ns -->
+  <!-- Inter-leaf route: node -> leaf -> spine -> leaf -> node (4 hops) -->
+  <!-- KEY: Floyd routing picks ONE spine path even though two exist -->
+
+  <zone id="fattree_2spine" routing="Floyd">
+
+    <!-- 8 compute hosts -->
+    <host id="node-0" speed="2000Gf"/>
+    <host id="node-1" speed="2000Gf"/>
+    <host id="node-2" speed="2000Gf"/>
+    <host id="node-3" speed="2000Gf"/>
+    <host id="node-4" speed="2000Gf"/>
+    <host id="node-5" speed="2000Gf"/>
+    <host id="node-6" speed="2000Gf"/>
+    <host id="node-7" speed="2000Gf"/>
+
+    <!-- 2 leaf switches -->
+    <host id="leaf-0" speed="1Gf"/>
+    <host id="leaf-1" speed="1Gf"/>
+
+    <!-- 2 spine switches -->
+    <host id="spine-0" speed="1Gf"/>
+    <host id="spine-1" speed="1Gf"/>
+
+    <!-- NIC links: node to leaf -->
+    <link id="nic-0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="nic-1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="nic-2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="nic-3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="nic-4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="nic-5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="nic-6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="nic-7" bandwidth="12.5GBps" latency="100ns"/>
+
+    <!-- Leaf-to-spine links (full bipartite: 2 x 2 = 4 links) -->
+    <link id="leaf0-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="leaf0-spine1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="leaf1-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="leaf1-spine1" bandwidth="12.5GBps" latency="100ns"/>
+
+    <!-- Routes: node <-> leaf -->
+    <route src="node-0" dst="leaf-0"> <link_ctn id="nic-0"/> </route>
+    <route src="node-1" dst="leaf-0"> <link_ctn id="nic-1"/> </route>
+    <route src="node-2" dst="leaf-0"> <link_ctn id="nic-2"/> </route>
+    <route src="node-3" dst="leaf-0"> <link_ctn id="nic-3"/> </route>
+    <route src="node-4" dst="leaf-1"> <link_ctn id="nic-4"/> </route>
+    <route src="node-5" dst="leaf-1"> <link_ctn id="nic-5"/> </route>
+    <route src="node-6" dst="leaf-1"> <link_ctn id="nic-6"/> </route>
+    <route src="node-7" dst="leaf-1"> <link_ctn id="nic-7"/> </route>
+
+    <!-- Routes: leaf <-> spine -->
+    <route src="leaf-0" dst="spine-0"> <link_ctn id="leaf0-spine0"/> </route>
+    <route src="leaf-0" dst="spine-1"> <link_ctn id="leaf0-spine1"/> </route>
+    <route src="leaf-1" dst="spine-0"> <link_ctn id="leaf1-spine0"/> </route>
+    <route src="leaf-1" dst="spine-1"> <link_ctn id="leaf1-spine1"/> </route>
+
+  </zone>
+</platform>

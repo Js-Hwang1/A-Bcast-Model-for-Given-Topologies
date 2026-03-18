@@ -1,0 +1,165 @@
+REDESIGNED HIERARCHICAL BROADCAST PLAN
+Dragonfly 128-node (4G x 4C x 4R x 2N), root = 0000
+======================================================
+
+KEY CONSTRAINT: Router-0 is the ONLY gateway at every level.
+  - Blue  (inter-group):   ONLY R0-C0 of each group has blue ports
+  - Black (inter-chassis): ONLY R0 of each chassis has black ports
+  - Green (intra-chassis): ALL routers connected all-to-all
+  - Red   (sibling):       2 nodes per router, each with its OWN 5.25GBps uplink
+
+  So ALL inter-chassis and inter-group traffic from a chassis
+  MUST route through Router-0. Node 0000's uplink carries ALL
+  blue + black + green sends FROM node 0000.
+
+  BUT: node 0001 has a SEPARATE uplink to the SAME router.
+  --> Sibling nodes can work in PARALLEL with zero uplink contention!
+  --> Different link types (blue vs black vs green) are also separate physical links.
+
+CONSEQUENCE FOR TREE DESIGN:
+  - Fan=2 is critical: uplink (5.25GBps) shared among children.
+    Fan=2 -> 2.6 GBps/child. Fan=7 -> 0.75 GBps/child (kills performance).
+  - The chain tree (current best, 0.746ms) already uses fan=2.
+  - We can improve by reducing depth from 10 to 7 using BALANCED BINARY SPLITS
+    at each hierarchy level, while keeping fan=2.
+
+======================================================
+TREE DESIGN: Balanced Binary Splits (depth=7, fan=2)
+======================================================
+
+Strategy: at each recursion level, split the node set in HALF
+along the dragonfly hierarchy. 128 = 2^7, so 7 balanced splits
+reach every node.
+
+  Level 1: {all 128}       -> {G0,G1}(64)    | {G2,G3}(64)
+  Level 2: {G0,G1}         -> {G0}(32)        | {G1}(32)
+           {G2,G3}         -> {G2}(32)        | {G3}(32)
+  Level 3: each group(32)  -> {C0,C1}(16)     | {C2,C3}(16)
+  Level 4: each pair(16)   -> {Cx}(8)         | {Cy}(8)
+  Level 5: each chassis(8) -> {R0,R1}(4)      | {R2,R3}(4)
+  Level 6: each pair(4)    -> {Rx}(2)         | {Ry}(2)
+  Level 7: each router(2)  -> {N0}(1)         | {N1}(1)
+
+  Depth = 7 levels. Every node has fan <= 2.
+
+======================================================
+REP SELECTION RULE
+======================================================
+
+At each split, parent picks ONE rep from each half.
+Rep = closest node to parent that is a GOOD GATEWAY for its half:
+  - If half spans multiple groups:   rep should be at R0-C0 (has blue ports)
+  - If half spans multiple chassis:  rep should be at R0 (has black ports)
+  - If half is within one chassis:   any node works (green is all-to-all)
+  - Tie-break: closest to parent (fewest hops)
+
+======================================================
+CONCRETE TREE (root = 0000)
+======================================================
+
+0000 (root)
+ |-- 0001  [rep of {G0,G1}, sibling, RED link]
+ |    |-- 0010  [rep of {G0\root pair}, GREEN link]
+ |    |    |-- 0011  [rep of {C0\R0}, sibling of 0010, RED]
+ |    |    |    |-- 0020  [rep of {R2-C0}, GREEN]
+ |    |    |    |    |-- 0021  [sibling, RED]
+ |    |    |    |    '-- 0030  [rep of {R3-C0}, GREEN]
+ |    |    |    |         '-- 0031  [sibling, RED]
+ |    |    |    '-- 0110  [rep of {R1-C1}, GREEN from 0011? no -- BLACK via R0]
+ |    |    |         |-- 0111  [sibling, RED]
+ |    |    |         '-- 0130  [rep of {R3-C1}, GREEN]
+ |    |    |              '-- 0131
+ |    |    '-- 0200  [rep of {C2,C3 of G0}, BLACK link via R0]
+ |    |         |-- 0201  [sibling, handles C2 local]
+ |    |         |    |-- 0210  [R1-C2, GREEN]
+ |    |         |    |    |-- 0211
+ |    |         |    |    '-- 0230  [R3-C2, GREEN]
+ |    |         |    |         '-- 0231
+ |    |         |    '-- 0220  [R2-C2, GREEN]
+ |    |         |         '-- 0221
+ |    |         '-- 0300  [rep of {C3}, BLACK]
+ |    |              |-- 0301  [sibling]
+ |    |              |    |-- 0310 -> 0311
+ |    |              |    '-- 0320 -> 0321
+ |    |              '-- 0330  [R3-C3]
+ |    |                   '-- 0331
+ |    '-- 1000  [rep of {G1}, BLUE link from 0001]
+ |         |-- 1001  [sibling, handles G1 local]
+ |         |    |-- 1100  [C1-G1, BLACK] -> ... (same pattern)
+ |         |    '-- 1010  [R1-C0-G1, GREEN] -> ...
+ |         '-- 1200  [rep of {C2,C3 of G1}, BLACK]
+ |              |-- 1201 -> ...
+ |              '-- 1300 -> ...
+ '-- 2000  [rep of {G2,G3}, BLUE link from 0000]
+      |-- 2001  [sibling, handles G2 local]
+      |    |-- 2010 -> ...  (same pattern as G0)
+      |    '-- 2100 -> ...
+      '-- 3000  [rep of {G3}, BLUE link from 2000]
+           |-- 3001  [sibling, handles G3 local]
+           |    |-- 3010 -> ...
+           |    '-- 3100 -> ...
+           '-- 3200  [rep of {C2,C3 of G3}, BLACK]
+                |-- 3201 -> ...
+                '-- 3300 -> ...
+
+======================================================
+WHY THE SIBLING-FIRST PATTERN MATTERS
+======================================================
+
+At the root level:
+  Step 1: 0000 sends chunk_0 to BOTH 0001 and 2000 (fan=2, shares uplink)
+  Step 2: 0000 sends chunk_1 to both.
+          Meanwhile: 0001 sends chunk_0 to 0010 and 1000
+                     2000 sends chunk_0 to 2001 and 3000
+
+  0000's sends use uplink_0 -> blue_g0_g2
+  0001's sends use uplink_1 -> green_r0_r1 AND blue_g0_g1
+  2000's sends use uplink_64 -> blue_g2_g3
+
+  ALL ON DIFFERENT PHYSICAL LINKS! True parallelism!
+
+The sibling at each router acts as a "parallel worker" because:
+  1. It has its OWN uplink (separate 5.25 GBps wire)
+  2. It connects to the SAME router (so same blue/black/green ports)
+  3. Different destinations use different outgoing links from the router
+
+======================================================
+DEPTH COMPARISON
+======================================================
+
+  Chain tree (current):     depth = 8-10,  fan = 2  -> 0.746ms
+  Dissemination tree:       depth = 7,     fan = 7  -> 1.571ms (terrible)
+  This balanced tree:       depth = 7,     fan = 2  -> ???
+
+  Pipeline formula: T ~ (depth + k - 1) * T_hop
+    Chain:    (10 + 127) * T_hop = 137 * T_hop
+    Balanced: ( 7 + 127) * T_hop = 134 * T_hop  (~2% fewer stages)
+
+  The improvement is modest because at k=128, depth matters little
+  compared to k. The real win is if the balanced structure also
+  reduces link contention (fewer nodes sharing the same physical links).
+
+======================================================
+PIPELINE TRACE (first 4 steps, k=128 chunks)
+======================================================
+
+t=0: 0000 -> {0001, 2000}  [chunk 0, red + blue]
+t=1: 0000 -> {0001, 2000}  [chunk 1]
+     0001 -> {0010, 1000}  [chunk 0, green + blue]   <- PARALLEL, own uplink!
+     2000 -> {2001, 3000}  [chunk 0, red + blue]     <- PARALLEL, own uplink!
+t=2: 0000 -> {0001, 2000}  [chunk 2]
+     0001 -> {0010, 1000}  [chunk 1]
+     2000 -> {2001, 3000}  [chunk 1]
+     0010 -> {0011, 0200}  [chunk 0, red + black]    <- 4 nodes active
+     1000 -> {1001, 1200}  [chunk 0, red + black]
+     2001 -> {2010, 2100}  [chunk 0, green + black]
+     3000 -> {3001, 3200}  [chunk 0, red + black]
+t=3: ... 8 more nodes activate, 15+ parallel sends ...
+
+By t=7: all 128 nodes have received chunk 0.
+By t=133: all 128 nodes have received all 128 chunks.
+     (= depth 7 + 128 - 1 - 1 = 133, since root already has data)
+
+======================================================
+NEXT STEP: Implement in encode.c and test with SimGrid
+======================================================

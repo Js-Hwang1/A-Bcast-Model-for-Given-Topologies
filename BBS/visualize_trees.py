@@ -134,6 +134,261 @@ def build_mesh(rows, cols):
     return N, adj, lat, flink, path_len, path_links, max_hops, pos, link_id
 
 
+# ── Build butterfly (hypercube) topology data ────────────────────────
+
+def build_butterfly(dim):
+    """Build adjacency, latency, flink, and path data for a hypercube.
+
+    Node i connects to i XOR 2^d for d = 0..dim-1.  Routing fixes
+    differing bits low-to-high, so paths are deterministic and the
+    first-link is always the lowest differing dimension.
+
+    Returns the same tuple as build_mesh():
+        N, adj, lat, flink, path_len, path_links, max_hops, pos, link_id
+    """
+    N = 1 << dim
+
+    # Edges: (a, a ^ 2^d) for a < a^2^d, across all dimensions
+    edges = []
+    for a in range(N):
+        for d in range(dim):
+            b = a ^ (1 << d)
+            if b > a:
+                edges.append((a, b))
+
+    # Link IDs (1-based, keyed by (lo, hi))
+    link_id = {}
+    for idx, (a, b) in enumerate(edges):
+        link_id[(a, b)] = idx + 1
+
+    # Adjacency
+    adj = np.zeros((N, N), dtype=bool)
+    for a, b in edges:
+        adj[a, b] = True
+        adj[b, a] = True
+
+    # Latency, flink, path data — computed directly from bit-fixing
+    # routing (no Floyd-Warshall needed).  Route from i to j fixes
+    # differing bits of i^j from low to high.
+    max_hops = dim
+    lat = np.zeros((N, N), dtype=float)
+    flink = np.zeros((N, N), dtype=int)
+    path_len = np.zeros((N, N), dtype=int)
+    path_links = np.zeros((N, N, max_hops), dtype=int)
+
+    for i in range(N):
+        for j in range(N):
+            if i == j:
+                continue
+            diff = i ^ j
+            hops = bin(diff).count('1')
+            lat[i, j] = float(hops)
+            path_len[i, j] = hops
+
+            # Walk the path: fix bits low-to-high
+            cur = i
+            step = 0
+            first_link_set = False
+            for d in range(dim):
+                if not (diff & (1 << d)):
+                    continue
+                nxt = cur ^ (1 << d)
+                lo, hi = min(cur, nxt), max(cur, nxt)
+                lid = link_id[(lo, hi)]
+                if not first_link_set:
+                    flink[i, j] = lid
+                    first_link_set = True
+                path_links[i, j, step] = lid
+                step += 1
+                cur = nxt
+
+    # Layout positions: use a simple grid for visualization
+    # Arrange nodes in a 2D grid of 2^ceil(dim/2) x 2^floor(dim/2)
+    cols = 1 << ((dim + 1) // 2)
+    rows = 1 << (dim // 2)
+    pos = {}
+    for i in range(N):
+        r, c = divmod(i, cols)
+        pos[i] = (c, rows - 1 - r)
+
+    return N, adj, lat, flink, path_len, path_links, max_hops, pos, link_id
+
+
+# ── Butterfly disjoint tree builder ───────────────────────────────────
+
+def butterfly_compute_trees(N, adj, lat, flink, path_len, path_links,
+                            max_hops, root):
+    """Build floor(dim/2) edge-disjoint spanning trees on a hypercube.
+
+    Each tree uses a unique set of edges (max_usage=1).  The algorithm
+    pairs dimensions and assigns each pair to one tree: tree t "owns"
+    dimensions (2t, 2t+1).  Within each tree, a BFS grows using all
+    dim dimensions, but prefers the owned dimensions to keep edges
+    exclusive.
+
+    For odd dim the last tree owns only 1 dimension, which is fine —
+    there's surplus budget.
+
+    Returns:
+        tau   : number of trees
+        trees : list of parent arrays (each length N, -1 = root)
+    """
+    dim = max_hops  # = log2(N)
+    tau = dim // 2
+    max_usage = 1
+
+    max_fl = int(np.max(flink)) + 2
+    edge_usage = [0] * max_fl
+
+    def edge_dim(a, b):
+        """Return hypercube dimension of edge (a, b)."""
+        x = a ^ b
+        d = 0
+        while x > 1:
+            x >>= 1
+            d += 1
+        return d
+
+    # Assign dimension ownership: tree t owns dims [2t, 2t+1]
+    # (last tree owns 1 dim if dim is odd)
+    dim_owner = [0] * dim
+    for d in range(dim):
+        dim_owner[d] = d // 2
+
+    print(f"BFLY: N={N} dim={dim} tau={tau} max_usage={max_usage} "
+          f"target=disjoint")
+
+    trees = [[-1] * N for _ in range(tau)]
+
+    # BFS order from root
+    from collections import deque
+    bfs_order = []
+    bfs_vis = [False] * N
+    bfs_vis[root] = True
+    bfs_q = deque([root])
+    while bfs_q:
+        u = bfs_q.popleft()
+        bfs_order.append(u)
+        for d in range(dim):
+            v = u ^ (1 << d)
+            if not bfs_vis[v]:
+                bfs_vis[v] = True
+                bfs_q.append(v)
+
+    # Build work list: (node, tree) pairs, round-robin across trees
+    unassigned = []
+    node_idx = 0
+    for v in bfs_order:
+        if v == root:
+            continue
+        start_t = node_idx % tau
+        for offset in range(tau):
+            t = (start_t + offset) % tau
+            unassigned.append((v, t))
+        node_idx += 1
+
+    def find_options(v, t):
+        """Return viable parents sorted by preference."""
+        opts = []
+        for d in range(dim):
+            u = v ^ (1 << d)
+            if u != root and trees[t][u] < 0:
+                continue
+            lo, hi = min(v, u), max(v, u)
+            fl = int(flink[v, u])
+            if 0 < fl < max_fl and edge_usage[fl] >= max_usage:
+                continue
+            # Prefer: owned dimension for this tree, then lowest usage
+            is_owned = 1 if dim_owner[d] == t else 0
+            usage = edge_usage[fl] if 0 < fl < max_fl else 0
+            opts.append((u, is_owned, usage, d))
+        return opts
+
+    def assign(v, t, parent):
+        trees[t][v] = parent
+        fl = int(flink[v, parent])
+        if 0 < fl < max_fl:
+            edge_usage[fl] += 1
+
+    # Iterative constraint propagation + greedy
+    for pass_num in range(N):
+        if not unassigned:
+            break
+
+        # Phase A: forced assignments (exactly 1 viable parent)
+        changed = True
+        while changed:
+            changed = False
+            remaining = []
+            for v, t in unassigned:
+                opts = find_options(v, t)
+                if len(opts) == 1:
+                    assign(v, t, opts[0][0])
+                    changed = True
+                else:
+                    remaining.append((v, t))
+            unassigned = remaining
+
+        # Phase B: greedy — prefer owned dimension, then lowest usage
+        new_unassigned = []
+        progress = False
+        for v, t in unassigned:
+            opts = find_options(v, t)
+            if opts:
+                # Sort: owned dim first (desc), then lowest usage, then
+                # lowest node ID
+                best = max(opts, key=lambda x: (x[1], -x[2], -x[0]))
+                assign(v, t, best[0])
+                progress = True
+            else:
+                new_unassigned.append((v, t))
+
+        if not progress and len(new_unassigned) == len(unassigned):
+            break
+        unassigned = new_unassigned
+
+    # Report results
+    n_unresolved = len(unassigned)
+    if n_unresolved > 0:
+        print(f"BFLY: WARNING: {n_unresolved} unresolved pairs")
+
+    max_depth = 0
+    for t in range(tau):
+        d = tree_depth(trees[t], N)
+        covered = sum(1 for i in range(N) if trees[t][i] >= 0 or i == root)
+        # Count edges per dimension
+        dim_counts = [0] * dim
+        for i in range(N):
+            if trees[t][i] >= 0:
+                dim_counts[edge_dim(i, trees[t][i])] += 1
+        excl = sum(1 for i in range(N) if trees[t][i] >= 0 and
+                   edge_usage[int(flink[trees[t][i], i])] == 1)
+        shared = (N - 1) - excl if covered == N else -1
+        print(f"BFLY:   T{t}: depth={d} covers={covered}/{N} "
+              f"exclusive={excl} shared={shared} "
+              f"dims={dim_counts}")
+        if d > max_depth:
+            max_depth = d
+
+    # Edge sharing stats
+    sharing = [0] * 4
+    for fl in range(1, max_fl):
+        u = edge_usage[fl]
+        if 0 < u < len(sharing):
+            sharing[u] += 1
+    max_share = max(edge_usage)
+    print(f"BFLY: max_depth={max_depth} max_edge_usage={max_share} "
+          f"sharing={sharing[1:]}")
+
+    # Verify spanning
+    for t in range(tau):
+        covered = sum(1 for i in range(N) if trees[t][i] >= 0 or i == root)
+        if covered != N:
+            print(f"BFLY: WARNING: Tree {t} covers only {covered}/{N}")
+
+    return tau, trees
+
+
 # ── BBS tree computation (port of encode.c) ──────────────────────────
 
 def tree_depth(parent, N):
