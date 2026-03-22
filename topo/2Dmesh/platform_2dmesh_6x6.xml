@@ -1,0 +1,175 @@
+<?xml version='1.0'?>
+<!DOCTYPE platform SYSTEM "https://simgrid.org/simgrid.dtd">
+<platform version="4.1">
+
+  <!-- 6x6 2D Mesh (36 nodes, 60 links) -->
+  <!-- Network: InfiniBand NDR 400 (50 GBps, 100 ns) -->
+
+  <zone id="mesh2d" routing="Floyd">
+
+    <!-- 36 hosts -->
+    <host id="node-0" speed="2000Gf"/>
+    <host id="node-1" speed="2000Gf"/>
+    <host id="node-2" speed="2000Gf"/>
+    <host id="node-3" speed="2000Gf"/>
+    <host id="node-4" speed="2000Gf"/>
+    <host id="node-5" speed="2000Gf"/>
+    <host id="node-6" speed="2000Gf"/>
+    <host id="node-7" speed="2000Gf"/>
+    <host id="node-8" speed="2000Gf"/>
+    <host id="node-9" speed="2000Gf"/>
+    <host id="node-10" speed="2000Gf"/>
+    <host id="node-11" speed="2000Gf"/>
+    <host id="node-12" speed="2000Gf"/>
+    <host id="node-13" speed="2000Gf"/>
+    <host id="node-14" speed="2000Gf"/>
+    <host id="node-15" speed="2000Gf"/>
+    <host id="node-16" speed="2000Gf"/>
+    <host id="node-17" speed="2000Gf"/>
+    <host id="node-18" speed="2000Gf"/>
+    <host id="node-19" speed="2000Gf"/>
+    <host id="node-20" speed="2000Gf"/>
+    <host id="node-21" speed="2000Gf"/>
+    <host id="node-22" speed="2000Gf"/>
+    <host id="node-23" speed="2000Gf"/>
+    <host id="node-24" speed="2000Gf"/>
+    <host id="node-25" speed="2000Gf"/>
+    <host id="node-26" speed="2000Gf"/>
+    <host id="node-27" speed="2000Gf"/>
+    <host id="node-28" speed="2000Gf"/>
+    <host id="node-29" speed="2000Gf"/>
+    <host id="node-30" speed="2000Gf"/>
+    <host id="node-31" speed="2000Gf"/>
+    <host id="node-32" speed="2000Gf"/>
+    <host id="node-33" speed="2000Gf"/>
+    <host id="node-34" speed="2000Gf"/>
+    <host id="node-35" speed="2000Gf"/>
+
+    <!-- 30 horizontal links (InfiniBand NDR 400) -->
+    <link id="link-0-1" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-1-2" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-2-3" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-3-4" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-4-5" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-6-7" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-7-8" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-8-9" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-9-10" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-10-11" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-12-13" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-13-14" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-14-15" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-15-16" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-16-17" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-18-19" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-19-20" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-20-21" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-21-22" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-22-23" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-24-25" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-25-26" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-26-27" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-27-28" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-28-29" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-30-31" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-31-32" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-32-33" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-33-34" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-34-35" bandwidth="50GBps" latency="100ns"/>
+
+    <!-- 30 vertical links -->
+    <link id="link-0-6" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-1-7" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-2-8" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-3-9" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-4-10" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-5-11" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-6-12" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-7-13" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-8-14" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-9-15" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-10-16" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-11-17" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-12-18" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-13-19" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-14-20" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-15-21" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-16-22" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-17-23" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-18-24" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-19-25" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-20-26" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-21-27" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-22-28" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-23-29" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-24-30" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-25-31" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-26-32" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-27-33" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-28-34" bandwidth="50GBps" latency="100ns"/>
+    <link id="link-29-35" bandwidth="50GBps" latency="100ns"/>
+
+    <!-- Direct neighbor routes (Floyd fills multi-hop) -->
+    <route src="node-0" dst="node-1"> <link_ctn id="link-0-1"/> </route>
+    <route src="node-1" dst="node-2"> <link_ctn id="link-1-2"/> </route>
+    <route src="node-2" dst="node-3"> <link_ctn id="link-2-3"/> </route>
+    <route src="node-3" dst="node-4"> <link_ctn id="link-3-4"/> </route>
+    <route src="node-4" dst="node-5"> <link_ctn id="link-4-5"/> </route>
+    <route src="node-6" dst="node-7"> <link_ctn id="link-6-7"/> </route>
+    <route src="node-7" dst="node-8"> <link_ctn id="link-7-8"/> </route>
+    <route src="node-8" dst="node-9"> <link_ctn id="link-8-9"/> </route>
+    <route src="node-9" dst="node-10"> <link_ctn id="link-9-10"/> </route>
+    <route src="node-10" dst="node-11"> <link_ctn id="link-10-11"/> </route>
+    <route src="node-12" dst="node-13"> <link_ctn id="link-12-13"/> </route>
+    <route src="node-13" dst="node-14"> <link_ctn id="link-13-14"/> </route>
+    <route src="node-14" dst="node-15"> <link_ctn id="link-14-15"/> </route>
+    <route src="node-15" dst="node-16"> <link_ctn id="link-15-16"/> </route>
+    <route src="node-16" dst="node-17"> <link_ctn id="link-16-17"/> </route>
+    <route src="node-18" dst="node-19"> <link_ctn id="link-18-19"/> </route>
+    <route src="node-19" dst="node-20"> <link_ctn id="link-19-20"/> </route>
+    <route src="node-20" dst="node-21"> <link_ctn id="link-20-21"/> </route>
+    <route src="node-21" dst="node-22"> <link_ctn id="link-21-22"/> </route>
+    <route src="node-22" dst="node-23"> <link_ctn id="link-22-23"/> </route>
+    <route src="node-24" dst="node-25"> <link_ctn id="link-24-25"/> </route>
+    <route src="node-25" dst="node-26"> <link_ctn id="link-25-26"/> </route>
+    <route src="node-26" dst="node-27"> <link_ctn id="link-26-27"/> </route>
+    <route src="node-27" dst="node-28"> <link_ctn id="link-27-28"/> </route>
+    <route src="node-28" dst="node-29"> <link_ctn id="link-28-29"/> </route>
+    <route src="node-30" dst="node-31"> <link_ctn id="link-30-31"/> </route>
+    <route src="node-31" dst="node-32"> <link_ctn id="link-31-32"/> </route>
+    <route src="node-32" dst="node-33"> <link_ctn id="link-32-33"/> </route>
+    <route src="node-33" dst="node-34"> <link_ctn id="link-33-34"/> </route>
+    <route src="node-34" dst="node-35"> <link_ctn id="link-34-35"/> </route>
+    <route src="node-0" dst="node-6"> <link_ctn id="link-0-6"/> </route>
+    <route src="node-1" dst="node-7"> <link_ctn id="link-1-7"/> </route>
+    <route src="node-2" dst="node-8"> <link_ctn id="link-2-8"/> </route>
+    <route src="node-3" dst="node-9"> <link_ctn id="link-3-9"/> </route>
+    <route src="node-4" dst="node-10"> <link_ctn id="link-4-10"/> </route>
+    <route src="node-5" dst="node-11"> <link_ctn id="link-5-11"/> </route>
+    <route src="node-6" dst="node-12"> <link_ctn id="link-6-12"/> </route>
+    <route src="node-7" dst="node-13"> <link_ctn id="link-7-13"/> </route>
+    <route src="node-8" dst="node-14"> <link_ctn id="link-8-14"/> </route>
+    <route src="node-9" dst="node-15"> <link_ctn id="link-9-15"/> </route>
+    <route src="node-10" dst="node-16"> <link_ctn id="link-10-16"/> </route>
+    <route src="node-11" dst="node-17"> <link_ctn id="link-11-17"/> </route>
+    <route src="node-12" dst="node-18"> <link_ctn id="link-12-18"/> </route>
+    <route src="node-13" dst="node-19"> <link_ctn id="link-13-19"/> </route>
+    <route src="node-14" dst="node-20"> <link_ctn id="link-14-20"/> </route>
+    <route src="node-15" dst="node-21"> <link_ctn id="link-15-21"/> </route>
+    <route src="node-16" dst="node-22"> <link_ctn id="link-16-22"/> </route>
+    <route src="node-17" dst="node-23"> <link_ctn id="link-17-23"/> </route>
+    <route src="node-18" dst="node-24"> <link_ctn id="link-18-24"/> </route>
+    <route src="node-19" dst="node-25"> <link_ctn id="link-19-25"/> </route>
+    <route src="node-20" dst="node-26"> <link_ctn id="link-20-26"/> </route>
+    <route src="node-21" dst="node-27"> <link_ctn id="link-21-27"/> </route>
+    <route src="node-22" dst="node-28"> <link_ctn id="link-22-28"/> </route>
+    <route src="node-23" dst="node-29"> <link_ctn id="link-23-29"/> </route>
+    <route src="node-24" dst="node-30"> <link_ctn id="link-24-30"/> </route>
+    <route src="node-25" dst="node-31"> <link_ctn id="link-25-31"/> </route>
+    <route src="node-26" dst="node-32"> <link_ctn id="link-26-32"/> </route>
+    <route src="node-27" dst="node-33"> <link_ctn id="link-27-33"/> </route>
+    <route src="node-28" dst="node-34"> <link_ctn id="link-28-34"/> </route>
+    <route src="node-29" dst="node-35"> <link_ctn id="link-29-35"/> </route>
+
+  </zone>
+</platform>

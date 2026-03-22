@@ -1,0 +1,70 @@
+N        = 512
+bw_min   = 1.250000e+10 B/s
+lat_base = 1.000000e-07 s
+
+Pairwise latencies (first 8 nodes, seconds):
+                 n-0         n-1         n-2         n-3         n-4         n-5         n-6         n-7
+  n-0      0.000e+00   1.000e-07   1.000e-07   2.000e-07   1.000e-07   2.000e-07   2.000e-07   3.000e-07
+  n-1      1.000e-07   0.000e+00   2.000e-07   1.000e-07   2.000e-07   1.000e-07   3.000e-07   2.000e-07
+  n-2      1.000e-07   2.000e-07   0.000e+00   1.000e-07   2.000e-07   3.000e-07   1.000e-07   2.000e-07
+  n-3      2.000e-07   1.000e-07   1.000e-07   0.000e+00   3.000e-07   2.000e-07   2.000e-07   1.000e-07
+  n-4      1.000e-07   2.000e-07   2.000e-07   3.000e-07   0.000e+00   1.000e-07   1.000e-07   2.000e-07
+  n-5      2.000e-07   1.000e-07   3.000e-07   2.000e-07   1.000e-07   0.000e+00   2.000e-07   1.000e-07
+  n-6      2.000e-07   3.000e-07   1.000e-07   2.000e-07   1.000e-07   2.000e-07   0.000e+00   1.000e-07
+  n-7      3.000e-07   2.000e-07   2.000e-07   1.000e-07   2.000e-07   1.000e-07   1.000e-07   0.000e+00
+
+First-link IDs (first 8 nodes):
+             n-0     n-1     n-2     n-3     n-4     n-5     n-6     n-7
+  n-0          0       1       4       1       7       1       4       1
+  n-1          1       0       1      13       1      15       1      13
+  n-2          4       4       0     571       4       4     573     571
+  n-3         13      13     571       0      13      13     571    1092
+  n-4          7       7       7       7       0    1575    1576    1575
+  n-5         15      15      15      15    1575       0    1575    1989
+  n-6        573     573     573     573    1576    1576       0    2066
+  n-7       1092    1092    1092    1092    1989    1989    2066       0
+
+First-link contention from node-0:
+  link ID    1:  256 destinations
+  link ID    4:  128 destinations
+  link ID    7:   64 destinations
+  link ID    9:   32 destinations
+  link ID    3:   16 destinations
+  link ID    6:    8 destinations
+  link ID    8:    4 destinations
+  link ID    2:    2 destinations
+  link ID    5:    1 destinations
+  Max contention group = 256
+  Num distinct first-links = 9
+
+Spectral analysis (9 eigenvectors):
+  Eigenvalues (λ₂..λ_10):
+    λ_2   = 1.135556e+02
+    λ_3   = 1.135556e+02
+    λ_4   = 1.135556e+02
+    λ_5   = 1.135556e+02
+    λ_6   = 1.135556e+02
+    λ_7   = 1.135556e+02
+    λ_8   = 1.135556e+02
+    λ_9   = 1.135556e+02
+    λ_10  = 1.135556e+02
+  Spectral gap ratio (λ₃/λ₂) = 1.0000
+    (small → sharp communities, large → uniform/flat)
+
+  Fiedler vector (v₂) sample (first 16 nodes):
+    node-0   : +0.000000
+    node-1   : -0.004456
+    node-2   : -0.023322
+    node-3   : -0.027778
+    node-4   : +0.022394
+    node-5   : +0.017937
+    node-6   : -0.000928
+    node-7   : -0.005385
+    node-8   : -0.001256
+    node-9   : -0.005712
+    node-10  : -0.024578
+    node-11  : -0.029034
+    node-12  : +0.021138
+    node-13  : +0.016681
+    node-14  : -0.002184
+    node-15  : -0.006640

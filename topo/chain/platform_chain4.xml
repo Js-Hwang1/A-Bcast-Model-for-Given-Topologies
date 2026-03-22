@@ -1,0 +1,27 @@
+<?xml version='1.0'?>
+<!DOCTYPE platform SYSTEM "https://simgrid.org/simgrid.dtd">
+<platform version="4.1">
+  <zone id="world" routing="Full">
+    <host id="node0" speed="2000Gf"/>
+    <host id="node1" speed="2000Gf"/>
+    <host id="node2" speed="2000Gf"/>
+    <host id="node3" speed="2000Gf"/>
+
+    <link id="link01" bandwidth="50GBps" latency="100ns"/>
+    <link id="link12" bandwidth="50GBps" latency="100ns"/>
+    <link id="link23" bandwidth="50GBps" latency="100ns"/>
+
+    <route src="node0" dst="node1"><link_ctn id="link01"/></route>
+    <route src="node1" dst="node2"><link_ctn id="link12"/></route>
+    <route src="node2" dst="node3"><link_ctn id="link23"/></route>
+    <route src="node0" dst="node2">
+      <link_ctn id="link01"/><link_ctn id="link12"/>
+    </route>
+    <route src="node0" dst="node3">
+      <link_ctn id="link01"/><link_ctn id="link12"/><link_ctn id="link23"/>
+    </route>
+    <route src="node1" dst="node3">
+      <link_ctn id="link12"/><link_ctn id="link23"/>
+    </route>
+  </zone>
+</platform>

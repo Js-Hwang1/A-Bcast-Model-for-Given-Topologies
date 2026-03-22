@@ -1,0 +1,1338 @@
+<?xml version='1.0'?>
+<!DOCTYPE platform SYSTEM "https://simgrid.org/simgrid.dtd">
+<platform version="4.1">
+
+  <!-- Fat-Tree: 256 compute nodes, 2-level non-blocking -->
+  <!-- 16 leaf switches (16 hosts each) + 16 spine switches -->
+  <!-- 512 links total -->
+  <!-- Network: InfiniBand EDR (12.5 GBps, 100 ns) -->
+  <!-- Ref: ORNL Summit / LLNL Sierra -->
+
+  <zone id="fattree" routing="Floyd">
+
+    <!-- 256 compute hosts -->
+    <host id="node-0" speed="2000Gf"/>
+    <host id="node-1" speed="2000Gf"/>
+    <host id="node-2" speed="2000Gf"/>
+    <host id="node-3" speed="2000Gf"/>
+    <host id="node-4" speed="2000Gf"/>
+    <host id="node-5" speed="2000Gf"/>
+    <host id="node-6" speed="2000Gf"/>
+    <host id="node-7" speed="2000Gf"/>
+    <host id="node-8" speed="2000Gf"/>
+    <host id="node-9" speed="2000Gf"/>
+    <host id="node-10" speed="2000Gf"/>
+    <host id="node-11" speed="2000Gf"/>
+    <host id="node-12" speed="2000Gf"/>
+    <host id="node-13" speed="2000Gf"/>
+    <host id="node-14" speed="2000Gf"/>
+    <host id="node-15" speed="2000Gf"/>
+    <host id="node-16" speed="2000Gf"/>
+    <host id="node-17" speed="2000Gf"/>
+    <host id="node-18" speed="2000Gf"/>
+    <host id="node-19" speed="2000Gf"/>
+    <host id="node-20" speed="2000Gf"/>
+    <host id="node-21" speed="2000Gf"/>
+    <host id="node-22" speed="2000Gf"/>
+    <host id="node-23" speed="2000Gf"/>
+    <host id="node-24" speed="2000Gf"/>
+    <host id="node-25" speed="2000Gf"/>
+    <host id="node-26" speed="2000Gf"/>
+    <host id="node-27" speed="2000Gf"/>
+    <host id="node-28" speed="2000Gf"/>
+    <host id="node-29" speed="2000Gf"/>
+    <host id="node-30" speed="2000Gf"/>
+    <host id="node-31" speed="2000Gf"/>
+    <host id="node-32" speed="2000Gf"/>
+    <host id="node-33" speed="2000Gf"/>
+    <host id="node-34" speed="2000Gf"/>
+    <host id="node-35" speed="2000Gf"/>
+    <host id="node-36" speed="2000Gf"/>
+    <host id="node-37" speed="2000Gf"/>
+    <host id="node-38" speed="2000Gf"/>
+    <host id="node-39" speed="2000Gf"/>
+    <host id="node-40" speed="2000Gf"/>
+    <host id="node-41" speed="2000Gf"/>
+    <host id="node-42" speed="2000Gf"/>
+    <host id="node-43" speed="2000Gf"/>
+    <host id="node-44" speed="2000Gf"/>
+    <host id="node-45" speed="2000Gf"/>
+    <host id="node-46" speed="2000Gf"/>
+    <host id="node-47" speed="2000Gf"/>
+    <host id="node-48" speed="2000Gf"/>
+    <host id="node-49" speed="2000Gf"/>
+    <host id="node-50" speed="2000Gf"/>
+    <host id="node-51" speed="2000Gf"/>
+    <host id="node-52" speed="2000Gf"/>
+    <host id="node-53" speed="2000Gf"/>
+    <host id="node-54" speed="2000Gf"/>
+    <host id="node-55" speed="2000Gf"/>
+    <host id="node-56" speed="2000Gf"/>
+    <host id="node-57" speed="2000Gf"/>
+    <host id="node-58" speed="2000Gf"/>
+    <host id="node-59" speed="2000Gf"/>
+    <host id="node-60" speed="2000Gf"/>
+    <host id="node-61" speed="2000Gf"/>
+    <host id="node-62" speed="2000Gf"/>
+    <host id="node-63" speed="2000Gf"/>
+    <host id="node-64" speed="2000Gf"/>
+    <host id="node-65" speed="2000Gf"/>
+    <host id="node-66" speed="2000Gf"/>
+    <host id="node-67" speed="2000Gf"/>
+    <host id="node-68" speed="2000Gf"/>
+    <host id="node-69" speed="2000Gf"/>
+    <host id="node-70" speed="2000Gf"/>
+    <host id="node-71" speed="2000Gf"/>
+    <host id="node-72" speed="2000Gf"/>
+    <host id="node-73" speed="2000Gf"/>
+    <host id="node-74" speed="2000Gf"/>
+    <host id="node-75" speed="2000Gf"/>
+    <host id="node-76" speed="2000Gf"/>
+    <host id="node-77" speed="2000Gf"/>
+    <host id="node-78" speed="2000Gf"/>
+    <host id="node-79" speed="2000Gf"/>
+    <host id="node-80" speed="2000Gf"/>
+    <host id="node-81" speed="2000Gf"/>
+    <host id="node-82" speed="2000Gf"/>
+    <host id="node-83" speed="2000Gf"/>
+    <host id="node-84" speed="2000Gf"/>
+    <host id="node-85" speed="2000Gf"/>
+    <host id="node-86" speed="2000Gf"/>
+    <host id="node-87" speed="2000Gf"/>
+    <host id="node-88" speed="2000Gf"/>
+    <host id="node-89" speed="2000Gf"/>
+    <host id="node-90" speed="2000Gf"/>
+    <host id="node-91" speed="2000Gf"/>
+    <host id="node-92" speed="2000Gf"/>
+    <host id="node-93" speed="2000Gf"/>
+    <host id="node-94" speed="2000Gf"/>
+    <host id="node-95" speed="2000Gf"/>
+    <host id="node-96" speed="2000Gf"/>
+    <host id="node-97" speed="2000Gf"/>
+    <host id="node-98" speed="2000Gf"/>
+    <host id="node-99" speed="2000Gf"/>
+    <host id="node-100" speed="2000Gf"/>
+    <host id="node-101" speed="2000Gf"/>
+    <host id="node-102" speed="2000Gf"/>
+    <host id="node-103" speed="2000Gf"/>
+    <host id="node-104" speed="2000Gf"/>
+    <host id="node-105" speed="2000Gf"/>
+    <host id="node-106" speed="2000Gf"/>
+    <host id="node-107" speed="2000Gf"/>
+    <host id="node-108" speed="2000Gf"/>
+    <host id="node-109" speed="2000Gf"/>
+    <host id="node-110" speed="2000Gf"/>
+    <host id="node-111" speed="2000Gf"/>
+    <host id="node-112" speed="2000Gf"/>
+    <host id="node-113" speed="2000Gf"/>
+    <host id="node-114" speed="2000Gf"/>
+    <host id="node-115" speed="2000Gf"/>
+    <host id="node-116" speed="2000Gf"/>
+    <host id="node-117" speed="2000Gf"/>
+    <host id="node-118" speed="2000Gf"/>
+    <host id="node-119" speed="2000Gf"/>
+    <host id="node-120" speed="2000Gf"/>
+    <host id="node-121" speed="2000Gf"/>
+    <host id="node-122" speed="2000Gf"/>
+    <host id="node-123" speed="2000Gf"/>
+    <host id="node-124" speed="2000Gf"/>
+    <host id="node-125" speed="2000Gf"/>
+    <host id="node-126" speed="2000Gf"/>
+    <host id="node-127" speed="2000Gf"/>
+    <host id="node-128" speed="2000Gf"/>
+    <host id="node-129" speed="2000Gf"/>
+    <host id="node-130" speed="2000Gf"/>
+    <host id="node-131" speed="2000Gf"/>
+    <host id="node-132" speed="2000Gf"/>
+    <host id="node-133" speed="2000Gf"/>
+    <host id="node-134" speed="2000Gf"/>
+    <host id="node-135" speed="2000Gf"/>
+    <host id="node-136" speed="2000Gf"/>
+    <host id="node-137" speed="2000Gf"/>
+    <host id="node-138" speed="2000Gf"/>
+    <host id="node-139" speed="2000Gf"/>
+    <host id="node-140" speed="2000Gf"/>
+    <host id="node-141" speed="2000Gf"/>
+    <host id="node-142" speed="2000Gf"/>
+    <host id="node-143" speed="2000Gf"/>
+    <host id="node-144" speed="2000Gf"/>
+    <host id="node-145" speed="2000Gf"/>
+    <host id="node-146" speed="2000Gf"/>
+    <host id="node-147" speed="2000Gf"/>
+    <host id="node-148" speed="2000Gf"/>
+    <host id="node-149" speed="2000Gf"/>
+    <host id="node-150" speed="2000Gf"/>
+    <host id="node-151" speed="2000Gf"/>
+    <host id="node-152" speed="2000Gf"/>
+    <host id="node-153" speed="2000Gf"/>
+    <host id="node-154" speed="2000Gf"/>
+    <host id="node-155" speed="2000Gf"/>
+    <host id="node-156" speed="2000Gf"/>
+    <host id="node-157" speed="2000Gf"/>
+    <host id="node-158" speed="2000Gf"/>
+    <host id="node-159" speed="2000Gf"/>
+    <host id="node-160" speed="2000Gf"/>
+    <host id="node-161" speed="2000Gf"/>
+    <host id="node-162" speed="2000Gf"/>
+    <host id="node-163" speed="2000Gf"/>
+    <host id="node-164" speed="2000Gf"/>
+    <host id="node-165" speed="2000Gf"/>
+    <host id="node-166" speed="2000Gf"/>
+    <host id="node-167" speed="2000Gf"/>
+    <host id="node-168" speed="2000Gf"/>
+    <host id="node-169" speed="2000Gf"/>
+    <host id="node-170" speed="2000Gf"/>
+    <host id="node-171" speed="2000Gf"/>
+    <host id="node-172" speed="2000Gf"/>
+    <host id="node-173" speed="2000Gf"/>
+    <host id="node-174" speed="2000Gf"/>
+    <host id="node-175" speed="2000Gf"/>
+    <host id="node-176" speed="2000Gf"/>
+    <host id="node-177" speed="2000Gf"/>
+    <host id="node-178" speed="2000Gf"/>
+    <host id="node-179" speed="2000Gf"/>
+    <host id="node-180" speed="2000Gf"/>
+    <host id="node-181" speed="2000Gf"/>
+    <host id="node-182" speed="2000Gf"/>
+    <host id="node-183" speed="2000Gf"/>
+    <host id="node-184" speed="2000Gf"/>
+    <host id="node-185" speed="2000Gf"/>
+    <host id="node-186" speed="2000Gf"/>
+    <host id="node-187" speed="2000Gf"/>
+    <host id="node-188" speed="2000Gf"/>
+    <host id="node-189" speed="2000Gf"/>
+    <host id="node-190" speed="2000Gf"/>
+    <host id="node-191" speed="2000Gf"/>
+    <host id="node-192" speed="2000Gf"/>
+    <host id="node-193" speed="2000Gf"/>
+    <host id="node-194" speed="2000Gf"/>
+    <host id="node-195" speed="2000Gf"/>
+    <host id="node-196" speed="2000Gf"/>
+    <host id="node-197" speed="2000Gf"/>
+    <host id="node-198" speed="2000Gf"/>
+    <host id="node-199" speed="2000Gf"/>
+    <host id="node-200" speed="2000Gf"/>
+    <host id="node-201" speed="2000Gf"/>
+    <host id="node-202" speed="2000Gf"/>
+    <host id="node-203" speed="2000Gf"/>
+    <host id="node-204" speed="2000Gf"/>
+    <host id="node-205" speed="2000Gf"/>
+    <host id="node-206" speed="2000Gf"/>
+    <host id="node-207" speed="2000Gf"/>
+    <host id="node-208" speed="2000Gf"/>
+    <host id="node-209" speed="2000Gf"/>
+    <host id="node-210" speed="2000Gf"/>
+    <host id="node-211" speed="2000Gf"/>
+    <host id="node-212" speed="2000Gf"/>
+    <host id="node-213" speed="2000Gf"/>
+    <host id="node-214" speed="2000Gf"/>
+    <host id="node-215" speed="2000Gf"/>
+    <host id="node-216" speed="2000Gf"/>
+    <host id="node-217" speed="2000Gf"/>
+    <host id="node-218" speed="2000Gf"/>
+    <host id="node-219" speed="2000Gf"/>
+    <host id="node-220" speed="2000Gf"/>
+    <host id="node-221" speed="2000Gf"/>
+    <host id="node-222" speed="2000Gf"/>
+    <host id="node-223" speed="2000Gf"/>
+    <host id="node-224" speed="2000Gf"/>
+    <host id="node-225" speed="2000Gf"/>
+    <host id="node-226" speed="2000Gf"/>
+    <host id="node-227" speed="2000Gf"/>
+    <host id="node-228" speed="2000Gf"/>
+    <host id="node-229" speed="2000Gf"/>
+    <host id="node-230" speed="2000Gf"/>
+    <host id="node-231" speed="2000Gf"/>
+    <host id="node-232" speed="2000Gf"/>
+    <host id="node-233" speed="2000Gf"/>
+    <host id="node-234" speed="2000Gf"/>
+    <host id="node-235" speed="2000Gf"/>
+    <host id="node-236" speed="2000Gf"/>
+    <host id="node-237" speed="2000Gf"/>
+    <host id="node-238" speed="2000Gf"/>
+    <host id="node-239" speed="2000Gf"/>
+    <host id="node-240" speed="2000Gf"/>
+    <host id="node-241" speed="2000Gf"/>
+    <host id="node-242" speed="2000Gf"/>
+    <host id="node-243" speed="2000Gf"/>
+    <host id="node-244" speed="2000Gf"/>
+    <host id="node-245" speed="2000Gf"/>
+    <host id="node-246" speed="2000Gf"/>
+    <host id="node-247" speed="2000Gf"/>
+    <host id="node-248" speed="2000Gf"/>
+    <host id="node-249" speed="2000Gf"/>
+    <host id="node-250" speed="2000Gf"/>
+    <host id="node-251" speed="2000Gf"/>
+    <host id="node-252" speed="2000Gf"/>
+    <host id="node-253" speed="2000Gf"/>
+    <host id="node-254" speed="2000Gf"/>
+    <host id="node-255" speed="2000Gf"/>
+
+    <!-- 16 leaf switches -->
+    <host id="leaf-0" speed="1Gf"/>
+    <host id="leaf-1" speed="1Gf"/>
+    <host id="leaf-2" speed="1Gf"/>
+    <host id="leaf-3" speed="1Gf"/>
+    <host id="leaf-4" speed="1Gf"/>
+    <host id="leaf-5" speed="1Gf"/>
+    <host id="leaf-6" speed="1Gf"/>
+    <host id="leaf-7" speed="1Gf"/>
+    <host id="leaf-8" speed="1Gf"/>
+    <host id="leaf-9" speed="1Gf"/>
+    <host id="leaf-10" speed="1Gf"/>
+    <host id="leaf-11" speed="1Gf"/>
+    <host id="leaf-12" speed="1Gf"/>
+    <host id="leaf-13" speed="1Gf"/>
+    <host id="leaf-14" speed="1Gf"/>
+    <host id="leaf-15" speed="1Gf"/>
+
+    <!-- 16 spine switches -->
+    <host id="spine-0" speed="1Gf"/>
+    <host id="spine-1" speed="1Gf"/>
+    <host id="spine-2" speed="1Gf"/>
+    <host id="spine-3" speed="1Gf"/>
+    <host id="spine-4" speed="1Gf"/>
+    <host id="spine-5" speed="1Gf"/>
+    <host id="spine-6" speed="1Gf"/>
+    <host id="spine-7" speed="1Gf"/>
+    <host id="spine-8" speed="1Gf"/>
+    <host id="spine-9" speed="1Gf"/>
+    <host id="spine-10" speed="1Gf"/>
+    <host id="spine-11" speed="1Gf"/>
+    <host id="spine-12" speed="1Gf"/>
+    <host id="spine-13" speed="1Gf"/>
+    <host id="spine-14" speed="1Gf"/>
+    <host id="spine-15" speed="1Gf"/>
+
+    <!-- 256 host-to-leaf links (InfiniBand EDR) -->
+    <link id="link-node0-leaf0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node1-leaf0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node2-leaf0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node3-leaf0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node4-leaf0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node5-leaf0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node6-leaf0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node7-leaf0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node8-leaf0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node9-leaf0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node10-leaf0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node11-leaf0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node12-leaf0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node13-leaf0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node14-leaf0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node15-leaf0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node16-leaf1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node17-leaf1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node18-leaf1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node19-leaf1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node20-leaf1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node21-leaf1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node22-leaf1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node23-leaf1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node24-leaf1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node25-leaf1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node26-leaf1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node27-leaf1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node28-leaf1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node29-leaf1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node30-leaf1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node31-leaf1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node32-leaf2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node33-leaf2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node34-leaf2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node35-leaf2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node36-leaf2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node37-leaf2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node38-leaf2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node39-leaf2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node40-leaf2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node41-leaf2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node42-leaf2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node43-leaf2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node44-leaf2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node45-leaf2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node46-leaf2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node47-leaf2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node48-leaf3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node49-leaf3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node50-leaf3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node51-leaf3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node52-leaf3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node53-leaf3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node54-leaf3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node55-leaf3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node56-leaf3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node57-leaf3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node58-leaf3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node59-leaf3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node60-leaf3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node61-leaf3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node62-leaf3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node63-leaf3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node64-leaf4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node65-leaf4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node66-leaf4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node67-leaf4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node68-leaf4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node69-leaf4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node70-leaf4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node71-leaf4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node72-leaf4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node73-leaf4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node74-leaf4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node75-leaf4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node76-leaf4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node77-leaf4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node78-leaf4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node79-leaf4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node80-leaf5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node81-leaf5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node82-leaf5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node83-leaf5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node84-leaf5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node85-leaf5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node86-leaf5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node87-leaf5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node88-leaf5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node89-leaf5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node90-leaf5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node91-leaf5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node92-leaf5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node93-leaf5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node94-leaf5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node95-leaf5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node96-leaf6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node97-leaf6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node98-leaf6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node99-leaf6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node100-leaf6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node101-leaf6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node102-leaf6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node103-leaf6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node104-leaf6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node105-leaf6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node106-leaf6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node107-leaf6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node108-leaf6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node109-leaf6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node110-leaf6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node111-leaf6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node112-leaf7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node113-leaf7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node114-leaf7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node115-leaf7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node116-leaf7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node117-leaf7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node118-leaf7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node119-leaf7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node120-leaf7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node121-leaf7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node122-leaf7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node123-leaf7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node124-leaf7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node125-leaf7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node126-leaf7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node127-leaf7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node128-leaf8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node129-leaf8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node130-leaf8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node131-leaf8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node132-leaf8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node133-leaf8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node134-leaf8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node135-leaf8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node136-leaf8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node137-leaf8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node138-leaf8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node139-leaf8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node140-leaf8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node141-leaf8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node142-leaf8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node143-leaf8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node144-leaf9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node145-leaf9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node146-leaf9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node147-leaf9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node148-leaf9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node149-leaf9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node150-leaf9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node151-leaf9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node152-leaf9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node153-leaf9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node154-leaf9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node155-leaf9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node156-leaf9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node157-leaf9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node158-leaf9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node159-leaf9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node160-leaf10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node161-leaf10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node162-leaf10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node163-leaf10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node164-leaf10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node165-leaf10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node166-leaf10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node167-leaf10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node168-leaf10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node169-leaf10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node170-leaf10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node171-leaf10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node172-leaf10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node173-leaf10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node174-leaf10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node175-leaf10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node176-leaf11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node177-leaf11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node178-leaf11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node179-leaf11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node180-leaf11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node181-leaf11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node182-leaf11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node183-leaf11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node184-leaf11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node185-leaf11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node186-leaf11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node187-leaf11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node188-leaf11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node189-leaf11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node190-leaf11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node191-leaf11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node192-leaf12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node193-leaf12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node194-leaf12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node195-leaf12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node196-leaf12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node197-leaf12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node198-leaf12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node199-leaf12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node200-leaf12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node201-leaf12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node202-leaf12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node203-leaf12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node204-leaf12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node205-leaf12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node206-leaf12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node207-leaf12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node208-leaf13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node209-leaf13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node210-leaf13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node211-leaf13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node212-leaf13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node213-leaf13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node214-leaf13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node215-leaf13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node216-leaf13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node217-leaf13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node218-leaf13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node219-leaf13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node220-leaf13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node221-leaf13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node222-leaf13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node223-leaf13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node224-leaf14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node225-leaf14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node226-leaf14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node227-leaf14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node228-leaf14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node229-leaf14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node230-leaf14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node231-leaf14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node232-leaf14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node233-leaf14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node234-leaf14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node235-leaf14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node236-leaf14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node237-leaf14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node238-leaf14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node239-leaf14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node240-leaf15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node241-leaf15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node242-leaf15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node243-leaf15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node244-leaf15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node245-leaf15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node246-leaf15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node247-leaf15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node248-leaf15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node249-leaf15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node250-leaf15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node251-leaf15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node252-leaf15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node253-leaf15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node254-leaf15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-node255-leaf15" bandwidth="12.5GBps" latency="100ns"/>
+
+    <!-- 256 leaf-to-spine links -->
+    <link id="link-leaf0-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf0-spine1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf0-spine2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf0-spine3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf0-spine4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf0-spine5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf0-spine6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf0-spine7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf0-spine8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf0-spine9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf0-spine10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf0-spine11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf0-spine12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf0-spine13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf0-spine14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf0-spine15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf1-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf1-spine1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf1-spine2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf1-spine3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf1-spine4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf1-spine5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf1-spine6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf1-spine7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf1-spine8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf1-spine9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf1-spine10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf1-spine11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf1-spine12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf1-spine13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf1-spine14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf1-spine15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf2-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf2-spine1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf2-spine2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf2-spine3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf2-spine4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf2-spine5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf2-spine6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf2-spine7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf2-spine8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf2-spine9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf2-spine10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf2-spine11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf2-spine12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf2-spine13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf2-spine14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf2-spine15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf3-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf3-spine1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf3-spine2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf3-spine3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf3-spine4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf3-spine5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf3-spine6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf3-spine7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf3-spine8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf3-spine9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf3-spine10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf3-spine11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf3-spine12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf3-spine13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf3-spine14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf3-spine15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf4-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf4-spine1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf4-spine2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf4-spine3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf4-spine4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf4-spine5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf4-spine6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf4-spine7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf4-spine8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf4-spine9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf4-spine10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf4-spine11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf4-spine12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf4-spine13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf4-spine14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf4-spine15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf5-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf5-spine1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf5-spine2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf5-spine3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf5-spine4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf5-spine5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf5-spine6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf5-spine7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf5-spine8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf5-spine9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf5-spine10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf5-spine11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf5-spine12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf5-spine13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf5-spine14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf5-spine15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf6-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf6-spine1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf6-spine2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf6-spine3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf6-spine4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf6-spine5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf6-spine6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf6-spine7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf6-spine8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf6-spine9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf6-spine10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf6-spine11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf6-spine12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf6-spine13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf6-spine14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf6-spine15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf7-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf7-spine1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf7-spine2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf7-spine3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf7-spine4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf7-spine5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf7-spine6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf7-spine7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf7-spine8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf7-spine9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf7-spine10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf7-spine11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf7-spine12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf7-spine13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf7-spine14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf7-spine15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf8-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf8-spine1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf8-spine2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf8-spine3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf8-spine4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf8-spine5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf8-spine6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf8-spine7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf8-spine8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf8-spine9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf8-spine10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf8-spine11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf8-spine12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf8-spine13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf8-spine14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf8-spine15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf9-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf9-spine1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf9-spine2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf9-spine3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf9-spine4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf9-spine5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf9-spine6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf9-spine7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf9-spine8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf9-spine9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf9-spine10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf9-spine11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf9-spine12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf9-spine13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf9-spine14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf9-spine15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf10-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf10-spine1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf10-spine2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf10-spine3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf10-spine4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf10-spine5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf10-spine6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf10-spine7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf10-spine8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf10-spine9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf10-spine10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf10-spine11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf10-spine12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf10-spine13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf10-spine14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf10-spine15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf11-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf11-spine1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf11-spine2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf11-spine3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf11-spine4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf11-spine5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf11-spine6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf11-spine7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf11-spine8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf11-spine9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf11-spine10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf11-spine11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf11-spine12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf11-spine13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf11-spine14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf11-spine15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf12-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf12-spine1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf12-spine2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf12-spine3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf12-spine4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf12-spine5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf12-spine6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf12-spine7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf12-spine8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf12-spine9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf12-spine10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf12-spine11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf12-spine12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf12-spine13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf12-spine14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf12-spine15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf13-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf13-spine1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf13-spine2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf13-spine3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf13-spine4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf13-spine5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf13-spine6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf13-spine7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf13-spine8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf13-spine9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf13-spine10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf13-spine11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf13-spine12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf13-spine13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf13-spine14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf13-spine15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf14-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf14-spine1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf14-spine2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf14-spine3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf14-spine4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf14-spine5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf14-spine6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf14-spine7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf14-spine8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf14-spine9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf14-spine10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf14-spine11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf14-spine12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf14-spine13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf14-spine14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf14-spine15" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf15-spine0" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf15-spine1" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf15-spine2" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf15-spine3" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf15-spine4" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf15-spine5" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf15-spine6" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf15-spine7" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf15-spine8" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf15-spine9" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf15-spine10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf15-spine11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf15-spine12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf15-spine13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf15-spine14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-leaf15-spine15" bandwidth="12.5GBps" latency="100ns"/>
+
+    <!-- Direct routes (Floyd computes multi-hop) -->
+    <route src="node-0" dst="leaf-0"> <link_ctn id="link-node0-leaf0"/> </route>
+    <route src="node-1" dst="leaf-0"> <link_ctn id="link-node1-leaf0"/> </route>
+    <route src="node-2" dst="leaf-0"> <link_ctn id="link-node2-leaf0"/> </route>
+    <route src="node-3" dst="leaf-0"> <link_ctn id="link-node3-leaf0"/> </route>
+    <route src="node-4" dst="leaf-0"> <link_ctn id="link-node4-leaf0"/> </route>
+    <route src="node-5" dst="leaf-0"> <link_ctn id="link-node5-leaf0"/> </route>
+    <route src="node-6" dst="leaf-0"> <link_ctn id="link-node6-leaf0"/> </route>
+    <route src="node-7" dst="leaf-0"> <link_ctn id="link-node7-leaf0"/> </route>
+    <route src="node-8" dst="leaf-0"> <link_ctn id="link-node8-leaf0"/> </route>
+    <route src="node-9" dst="leaf-0"> <link_ctn id="link-node9-leaf0"/> </route>
+    <route src="node-10" dst="leaf-0"> <link_ctn id="link-node10-leaf0"/> </route>
+    <route src="node-11" dst="leaf-0"> <link_ctn id="link-node11-leaf0"/> </route>
+    <route src="node-12" dst="leaf-0"> <link_ctn id="link-node12-leaf0"/> </route>
+    <route src="node-13" dst="leaf-0"> <link_ctn id="link-node13-leaf0"/> </route>
+    <route src="node-14" dst="leaf-0"> <link_ctn id="link-node14-leaf0"/> </route>
+    <route src="node-15" dst="leaf-0"> <link_ctn id="link-node15-leaf0"/> </route>
+    <route src="node-16" dst="leaf-1"> <link_ctn id="link-node16-leaf1"/> </route>
+    <route src="node-17" dst="leaf-1"> <link_ctn id="link-node17-leaf1"/> </route>
+    <route src="node-18" dst="leaf-1"> <link_ctn id="link-node18-leaf1"/> </route>
+    <route src="node-19" dst="leaf-1"> <link_ctn id="link-node19-leaf1"/> </route>
+    <route src="node-20" dst="leaf-1"> <link_ctn id="link-node20-leaf1"/> </route>
+    <route src="node-21" dst="leaf-1"> <link_ctn id="link-node21-leaf1"/> </route>
+    <route src="node-22" dst="leaf-1"> <link_ctn id="link-node22-leaf1"/> </route>
+    <route src="node-23" dst="leaf-1"> <link_ctn id="link-node23-leaf1"/> </route>
+    <route src="node-24" dst="leaf-1"> <link_ctn id="link-node24-leaf1"/> </route>
+    <route src="node-25" dst="leaf-1"> <link_ctn id="link-node25-leaf1"/> </route>
+    <route src="node-26" dst="leaf-1"> <link_ctn id="link-node26-leaf1"/> </route>
+    <route src="node-27" dst="leaf-1"> <link_ctn id="link-node27-leaf1"/> </route>
+    <route src="node-28" dst="leaf-1"> <link_ctn id="link-node28-leaf1"/> </route>
+    <route src="node-29" dst="leaf-1"> <link_ctn id="link-node29-leaf1"/> </route>
+    <route src="node-30" dst="leaf-1"> <link_ctn id="link-node30-leaf1"/> </route>
+    <route src="node-31" dst="leaf-1"> <link_ctn id="link-node31-leaf1"/> </route>
+    <route src="node-32" dst="leaf-2"> <link_ctn id="link-node32-leaf2"/> </route>
+    <route src="node-33" dst="leaf-2"> <link_ctn id="link-node33-leaf2"/> </route>
+    <route src="node-34" dst="leaf-2"> <link_ctn id="link-node34-leaf2"/> </route>
+    <route src="node-35" dst="leaf-2"> <link_ctn id="link-node35-leaf2"/> </route>
+    <route src="node-36" dst="leaf-2"> <link_ctn id="link-node36-leaf2"/> </route>
+    <route src="node-37" dst="leaf-2"> <link_ctn id="link-node37-leaf2"/> </route>
+    <route src="node-38" dst="leaf-2"> <link_ctn id="link-node38-leaf2"/> </route>
+    <route src="node-39" dst="leaf-2"> <link_ctn id="link-node39-leaf2"/> </route>
+    <route src="node-40" dst="leaf-2"> <link_ctn id="link-node40-leaf2"/> </route>
+    <route src="node-41" dst="leaf-2"> <link_ctn id="link-node41-leaf2"/> </route>
+    <route src="node-42" dst="leaf-2"> <link_ctn id="link-node42-leaf2"/> </route>
+    <route src="node-43" dst="leaf-2"> <link_ctn id="link-node43-leaf2"/> </route>
+    <route src="node-44" dst="leaf-2"> <link_ctn id="link-node44-leaf2"/> </route>
+    <route src="node-45" dst="leaf-2"> <link_ctn id="link-node45-leaf2"/> </route>
+    <route src="node-46" dst="leaf-2"> <link_ctn id="link-node46-leaf2"/> </route>
+    <route src="node-47" dst="leaf-2"> <link_ctn id="link-node47-leaf2"/> </route>
+    <route src="node-48" dst="leaf-3"> <link_ctn id="link-node48-leaf3"/> </route>
+    <route src="node-49" dst="leaf-3"> <link_ctn id="link-node49-leaf3"/> </route>
+    <route src="node-50" dst="leaf-3"> <link_ctn id="link-node50-leaf3"/> </route>
+    <route src="node-51" dst="leaf-3"> <link_ctn id="link-node51-leaf3"/> </route>
+    <route src="node-52" dst="leaf-3"> <link_ctn id="link-node52-leaf3"/> </route>
+    <route src="node-53" dst="leaf-3"> <link_ctn id="link-node53-leaf3"/> </route>
+    <route src="node-54" dst="leaf-3"> <link_ctn id="link-node54-leaf3"/> </route>
+    <route src="node-55" dst="leaf-3"> <link_ctn id="link-node55-leaf3"/> </route>
+    <route src="node-56" dst="leaf-3"> <link_ctn id="link-node56-leaf3"/> </route>
+    <route src="node-57" dst="leaf-3"> <link_ctn id="link-node57-leaf3"/> </route>
+    <route src="node-58" dst="leaf-3"> <link_ctn id="link-node58-leaf3"/> </route>
+    <route src="node-59" dst="leaf-3"> <link_ctn id="link-node59-leaf3"/> </route>
+    <route src="node-60" dst="leaf-3"> <link_ctn id="link-node60-leaf3"/> </route>
+    <route src="node-61" dst="leaf-3"> <link_ctn id="link-node61-leaf3"/> </route>
+    <route src="node-62" dst="leaf-3"> <link_ctn id="link-node62-leaf3"/> </route>
+    <route src="node-63" dst="leaf-3"> <link_ctn id="link-node63-leaf3"/> </route>
+    <route src="node-64" dst="leaf-4"> <link_ctn id="link-node64-leaf4"/> </route>
+    <route src="node-65" dst="leaf-4"> <link_ctn id="link-node65-leaf4"/> </route>
+    <route src="node-66" dst="leaf-4"> <link_ctn id="link-node66-leaf4"/> </route>
+    <route src="node-67" dst="leaf-4"> <link_ctn id="link-node67-leaf4"/> </route>
+    <route src="node-68" dst="leaf-4"> <link_ctn id="link-node68-leaf4"/> </route>
+    <route src="node-69" dst="leaf-4"> <link_ctn id="link-node69-leaf4"/> </route>
+    <route src="node-70" dst="leaf-4"> <link_ctn id="link-node70-leaf4"/> </route>
+    <route src="node-71" dst="leaf-4"> <link_ctn id="link-node71-leaf4"/> </route>
+    <route src="node-72" dst="leaf-4"> <link_ctn id="link-node72-leaf4"/> </route>
+    <route src="node-73" dst="leaf-4"> <link_ctn id="link-node73-leaf4"/> </route>
+    <route src="node-74" dst="leaf-4"> <link_ctn id="link-node74-leaf4"/> </route>
+    <route src="node-75" dst="leaf-4"> <link_ctn id="link-node75-leaf4"/> </route>
+    <route src="node-76" dst="leaf-4"> <link_ctn id="link-node76-leaf4"/> </route>
+    <route src="node-77" dst="leaf-4"> <link_ctn id="link-node77-leaf4"/> </route>
+    <route src="node-78" dst="leaf-4"> <link_ctn id="link-node78-leaf4"/> </route>
+    <route src="node-79" dst="leaf-4"> <link_ctn id="link-node79-leaf4"/> </route>
+    <route src="node-80" dst="leaf-5"> <link_ctn id="link-node80-leaf5"/> </route>
+    <route src="node-81" dst="leaf-5"> <link_ctn id="link-node81-leaf5"/> </route>
+    <route src="node-82" dst="leaf-5"> <link_ctn id="link-node82-leaf5"/> </route>
+    <route src="node-83" dst="leaf-5"> <link_ctn id="link-node83-leaf5"/> </route>
+    <route src="node-84" dst="leaf-5"> <link_ctn id="link-node84-leaf5"/> </route>
+    <route src="node-85" dst="leaf-5"> <link_ctn id="link-node85-leaf5"/> </route>
+    <route src="node-86" dst="leaf-5"> <link_ctn id="link-node86-leaf5"/> </route>
+    <route src="node-87" dst="leaf-5"> <link_ctn id="link-node87-leaf5"/> </route>
+    <route src="node-88" dst="leaf-5"> <link_ctn id="link-node88-leaf5"/> </route>
+    <route src="node-89" dst="leaf-5"> <link_ctn id="link-node89-leaf5"/> </route>
+    <route src="node-90" dst="leaf-5"> <link_ctn id="link-node90-leaf5"/> </route>
+    <route src="node-91" dst="leaf-5"> <link_ctn id="link-node91-leaf5"/> </route>
+    <route src="node-92" dst="leaf-5"> <link_ctn id="link-node92-leaf5"/> </route>
+    <route src="node-93" dst="leaf-5"> <link_ctn id="link-node93-leaf5"/> </route>
+    <route src="node-94" dst="leaf-5"> <link_ctn id="link-node94-leaf5"/> </route>
+    <route src="node-95" dst="leaf-5"> <link_ctn id="link-node95-leaf5"/> </route>
+    <route src="node-96" dst="leaf-6"> <link_ctn id="link-node96-leaf6"/> </route>
+    <route src="node-97" dst="leaf-6"> <link_ctn id="link-node97-leaf6"/> </route>
+    <route src="node-98" dst="leaf-6"> <link_ctn id="link-node98-leaf6"/> </route>
+    <route src="node-99" dst="leaf-6"> <link_ctn id="link-node99-leaf6"/> </route>
+    <route src="node-100" dst="leaf-6"> <link_ctn id="link-node100-leaf6"/> </route>
+    <route src="node-101" dst="leaf-6"> <link_ctn id="link-node101-leaf6"/> </route>
+    <route src="node-102" dst="leaf-6"> <link_ctn id="link-node102-leaf6"/> </route>
+    <route src="node-103" dst="leaf-6"> <link_ctn id="link-node103-leaf6"/> </route>
+    <route src="node-104" dst="leaf-6"> <link_ctn id="link-node104-leaf6"/> </route>
+    <route src="node-105" dst="leaf-6"> <link_ctn id="link-node105-leaf6"/> </route>
+    <route src="node-106" dst="leaf-6"> <link_ctn id="link-node106-leaf6"/> </route>
+    <route src="node-107" dst="leaf-6"> <link_ctn id="link-node107-leaf6"/> </route>
+    <route src="node-108" dst="leaf-6"> <link_ctn id="link-node108-leaf6"/> </route>
+    <route src="node-109" dst="leaf-6"> <link_ctn id="link-node109-leaf6"/> </route>
+    <route src="node-110" dst="leaf-6"> <link_ctn id="link-node110-leaf6"/> </route>
+    <route src="node-111" dst="leaf-6"> <link_ctn id="link-node111-leaf6"/> </route>
+    <route src="node-112" dst="leaf-7"> <link_ctn id="link-node112-leaf7"/> </route>
+    <route src="node-113" dst="leaf-7"> <link_ctn id="link-node113-leaf7"/> </route>
+    <route src="node-114" dst="leaf-7"> <link_ctn id="link-node114-leaf7"/> </route>
+    <route src="node-115" dst="leaf-7"> <link_ctn id="link-node115-leaf7"/> </route>
+    <route src="node-116" dst="leaf-7"> <link_ctn id="link-node116-leaf7"/> </route>
+    <route src="node-117" dst="leaf-7"> <link_ctn id="link-node117-leaf7"/> </route>
+    <route src="node-118" dst="leaf-7"> <link_ctn id="link-node118-leaf7"/> </route>
+    <route src="node-119" dst="leaf-7"> <link_ctn id="link-node119-leaf7"/> </route>
+    <route src="node-120" dst="leaf-7"> <link_ctn id="link-node120-leaf7"/> </route>
+    <route src="node-121" dst="leaf-7"> <link_ctn id="link-node121-leaf7"/> </route>
+    <route src="node-122" dst="leaf-7"> <link_ctn id="link-node122-leaf7"/> </route>
+    <route src="node-123" dst="leaf-7"> <link_ctn id="link-node123-leaf7"/> </route>
+    <route src="node-124" dst="leaf-7"> <link_ctn id="link-node124-leaf7"/> </route>
+    <route src="node-125" dst="leaf-7"> <link_ctn id="link-node125-leaf7"/> </route>
+    <route src="node-126" dst="leaf-7"> <link_ctn id="link-node126-leaf7"/> </route>
+    <route src="node-127" dst="leaf-7"> <link_ctn id="link-node127-leaf7"/> </route>
+    <route src="node-128" dst="leaf-8"> <link_ctn id="link-node128-leaf8"/> </route>
+    <route src="node-129" dst="leaf-8"> <link_ctn id="link-node129-leaf8"/> </route>
+    <route src="node-130" dst="leaf-8"> <link_ctn id="link-node130-leaf8"/> </route>
+    <route src="node-131" dst="leaf-8"> <link_ctn id="link-node131-leaf8"/> </route>
+    <route src="node-132" dst="leaf-8"> <link_ctn id="link-node132-leaf8"/> </route>
+    <route src="node-133" dst="leaf-8"> <link_ctn id="link-node133-leaf8"/> </route>
+    <route src="node-134" dst="leaf-8"> <link_ctn id="link-node134-leaf8"/> </route>
+    <route src="node-135" dst="leaf-8"> <link_ctn id="link-node135-leaf8"/> </route>
+    <route src="node-136" dst="leaf-8"> <link_ctn id="link-node136-leaf8"/> </route>
+    <route src="node-137" dst="leaf-8"> <link_ctn id="link-node137-leaf8"/> </route>
+    <route src="node-138" dst="leaf-8"> <link_ctn id="link-node138-leaf8"/> </route>
+    <route src="node-139" dst="leaf-8"> <link_ctn id="link-node139-leaf8"/> </route>
+    <route src="node-140" dst="leaf-8"> <link_ctn id="link-node140-leaf8"/> </route>
+    <route src="node-141" dst="leaf-8"> <link_ctn id="link-node141-leaf8"/> </route>
+    <route src="node-142" dst="leaf-8"> <link_ctn id="link-node142-leaf8"/> </route>
+    <route src="node-143" dst="leaf-8"> <link_ctn id="link-node143-leaf8"/> </route>
+    <route src="node-144" dst="leaf-9"> <link_ctn id="link-node144-leaf9"/> </route>
+    <route src="node-145" dst="leaf-9"> <link_ctn id="link-node145-leaf9"/> </route>
+    <route src="node-146" dst="leaf-9"> <link_ctn id="link-node146-leaf9"/> </route>
+    <route src="node-147" dst="leaf-9"> <link_ctn id="link-node147-leaf9"/> </route>
+    <route src="node-148" dst="leaf-9"> <link_ctn id="link-node148-leaf9"/> </route>
+    <route src="node-149" dst="leaf-9"> <link_ctn id="link-node149-leaf9"/> </route>
+    <route src="node-150" dst="leaf-9"> <link_ctn id="link-node150-leaf9"/> </route>
+    <route src="node-151" dst="leaf-9"> <link_ctn id="link-node151-leaf9"/> </route>
+    <route src="node-152" dst="leaf-9"> <link_ctn id="link-node152-leaf9"/> </route>
+    <route src="node-153" dst="leaf-9"> <link_ctn id="link-node153-leaf9"/> </route>
+    <route src="node-154" dst="leaf-9"> <link_ctn id="link-node154-leaf9"/> </route>
+    <route src="node-155" dst="leaf-9"> <link_ctn id="link-node155-leaf9"/> </route>
+    <route src="node-156" dst="leaf-9"> <link_ctn id="link-node156-leaf9"/> </route>
+    <route src="node-157" dst="leaf-9"> <link_ctn id="link-node157-leaf9"/> </route>
+    <route src="node-158" dst="leaf-9"> <link_ctn id="link-node158-leaf9"/> </route>
+    <route src="node-159" dst="leaf-9"> <link_ctn id="link-node159-leaf9"/> </route>
+    <route src="node-160" dst="leaf-10"> <link_ctn id="link-node160-leaf10"/> </route>
+    <route src="node-161" dst="leaf-10"> <link_ctn id="link-node161-leaf10"/> </route>
+    <route src="node-162" dst="leaf-10"> <link_ctn id="link-node162-leaf10"/> </route>
+    <route src="node-163" dst="leaf-10"> <link_ctn id="link-node163-leaf10"/> </route>
+    <route src="node-164" dst="leaf-10"> <link_ctn id="link-node164-leaf10"/> </route>
+    <route src="node-165" dst="leaf-10"> <link_ctn id="link-node165-leaf10"/> </route>
+    <route src="node-166" dst="leaf-10"> <link_ctn id="link-node166-leaf10"/> </route>
+    <route src="node-167" dst="leaf-10"> <link_ctn id="link-node167-leaf10"/> </route>
+    <route src="node-168" dst="leaf-10"> <link_ctn id="link-node168-leaf10"/> </route>
+    <route src="node-169" dst="leaf-10"> <link_ctn id="link-node169-leaf10"/> </route>
+    <route src="node-170" dst="leaf-10"> <link_ctn id="link-node170-leaf10"/> </route>
+    <route src="node-171" dst="leaf-10"> <link_ctn id="link-node171-leaf10"/> </route>
+    <route src="node-172" dst="leaf-10"> <link_ctn id="link-node172-leaf10"/> </route>
+    <route src="node-173" dst="leaf-10"> <link_ctn id="link-node173-leaf10"/> </route>
+    <route src="node-174" dst="leaf-10"> <link_ctn id="link-node174-leaf10"/> </route>
+    <route src="node-175" dst="leaf-10"> <link_ctn id="link-node175-leaf10"/> </route>
+    <route src="node-176" dst="leaf-11"> <link_ctn id="link-node176-leaf11"/> </route>
+    <route src="node-177" dst="leaf-11"> <link_ctn id="link-node177-leaf11"/> </route>
+    <route src="node-178" dst="leaf-11"> <link_ctn id="link-node178-leaf11"/> </route>
+    <route src="node-179" dst="leaf-11"> <link_ctn id="link-node179-leaf11"/> </route>
+    <route src="node-180" dst="leaf-11"> <link_ctn id="link-node180-leaf11"/> </route>
+    <route src="node-181" dst="leaf-11"> <link_ctn id="link-node181-leaf11"/> </route>
+    <route src="node-182" dst="leaf-11"> <link_ctn id="link-node182-leaf11"/> </route>
+    <route src="node-183" dst="leaf-11"> <link_ctn id="link-node183-leaf11"/> </route>
+    <route src="node-184" dst="leaf-11"> <link_ctn id="link-node184-leaf11"/> </route>
+    <route src="node-185" dst="leaf-11"> <link_ctn id="link-node185-leaf11"/> </route>
+    <route src="node-186" dst="leaf-11"> <link_ctn id="link-node186-leaf11"/> </route>
+    <route src="node-187" dst="leaf-11"> <link_ctn id="link-node187-leaf11"/> </route>
+    <route src="node-188" dst="leaf-11"> <link_ctn id="link-node188-leaf11"/> </route>
+    <route src="node-189" dst="leaf-11"> <link_ctn id="link-node189-leaf11"/> </route>
+    <route src="node-190" dst="leaf-11"> <link_ctn id="link-node190-leaf11"/> </route>
+    <route src="node-191" dst="leaf-11"> <link_ctn id="link-node191-leaf11"/> </route>
+    <route src="node-192" dst="leaf-12"> <link_ctn id="link-node192-leaf12"/> </route>
+    <route src="node-193" dst="leaf-12"> <link_ctn id="link-node193-leaf12"/> </route>
+    <route src="node-194" dst="leaf-12"> <link_ctn id="link-node194-leaf12"/> </route>
+    <route src="node-195" dst="leaf-12"> <link_ctn id="link-node195-leaf12"/> </route>
+    <route src="node-196" dst="leaf-12"> <link_ctn id="link-node196-leaf12"/> </route>
+    <route src="node-197" dst="leaf-12"> <link_ctn id="link-node197-leaf12"/> </route>
+    <route src="node-198" dst="leaf-12"> <link_ctn id="link-node198-leaf12"/> </route>
+    <route src="node-199" dst="leaf-12"> <link_ctn id="link-node199-leaf12"/> </route>
+    <route src="node-200" dst="leaf-12"> <link_ctn id="link-node200-leaf12"/> </route>
+    <route src="node-201" dst="leaf-12"> <link_ctn id="link-node201-leaf12"/> </route>
+    <route src="node-202" dst="leaf-12"> <link_ctn id="link-node202-leaf12"/> </route>
+    <route src="node-203" dst="leaf-12"> <link_ctn id="link-node203-leaf12"/> </route>
+    <route src="node-204" dst="leaf-12"> <link_ctn id="link-node204-leaf12"/> </route>
+    <route src="node-205" dst="leaf-12"> <link_ctn id="link-node205-leaf12"/> </route>
+    <route src="node-206" dst="leaf-12"> <link_ctn id="link-node206-leaf12"/> </route>
+    <route src="node-207" dst="leaf-12"> <link_ctn id="link-node207-leaf12"/> </route>
+    <route src="node-208" dst="leaf-13"> <link_ctn id="link-node208-leaf13"/> </route>
+    <route src="node-209" dst="leaf-13"> <link_ctn id="link-node209-leaf13"/> </route>
+    <route src="node-210" dst="leaf-13"> <link_ctn id="link-node210-leaf13"/> </route>
+    <route src="node-211" dst="leaf-13"> <link_ctn id="link-node211-leaf13"/> </route>
+    <route src="node-212" dst="leaf-13"> <link_ctn id="link-node212-leaf13"/> </route>
+    <route src="node-213" dst="leaf-13"> <link_ctn id="link-node213-leaf13"/> </route>
+    <route src="node-214" dst="leaf-13"> <link_ctn id="link-node214-leaf13"/> </route>
+    <route src="node-215" dst="leaf-13"> <link_ctn id="link-node215-leaf13"/> </route>
+    <route src="node-216" dst="leaf-13"> <link_ctn id="link-node216-leaf13"/> </route>
+    <route src="node-217" dst="leaf-13"> <link_ctn id="link-node217-leaf13"/> </route>
+    <route src="node-218" dst="leaf-13"> <link_ctn id="link-node218-leaf13"/> </route>
+    <route src="node-219" dst="leaf-13"> <link_ctn id="link-node219-leaf13"/> </route>
+    <route src="node-220" dst="leaf-13"> <link_ctn id="link-node220-leaf13"/> </route>
+    <route src="node-221" dst="leaf-13"> <link_ctn id="link-node221-leaf13"/> </route>
+    <route src="node-222" dst="leaf-13"> <link_ctn id="link-node222-leaf13"/> </route>
+    <route src="node-223" dst="leaf-13"> <link_ctn id="link-node223-leaf13"/> </route>
+    <route src="node-224" dst="leaf-14"> <link_ctn id="link-node224-leaf14"/> </route>
+    <route src="node-225" dst="leaf-14"> <link_ctn id="link-node225-leaf14"/> </route>
+    <route src="node-226" dst="leaf-14"> <link_ctn id="link-node226-leaf14"/> </route>
+    <route src="node-227" dst="leaf-14"> <link_ctn id="link-node227-leaf14"/> </route>
+    <route src="node-228" dst="leaf-14"> <link_ctn id="link-node228-leaf14"/> </route>
+    <route src="node-229" dst="leaf-14"> <link_ctn id="link-node229-leaf14"/> </route>
+    <route src="node-230" dst="leaf-14"> <link_ctn id="link-node230-leaf14"/> </route>
+    <route src="node-231" dst="leaf-14"> <link_ctn id="link-node231-leaf14"/> </route>
+    <route src="node-232" dst="leaf-14"> <link_ctn id="link-node232-leaf14"/> </route>
+    <route src="node-233" dst="leaf-14"> <link_ctn id="link-node233-leaf14"/> </route>
+    <route src="node-234" dst="leaf-14"> <link_ctn id="link-node234-leaf14"/> </route>
+    <route src="node-235" dst="leaf-14"> <link_ctn id="link-node235-leaf14"/> </route>
+    <route src="node-236" dst="leaf-14"> <link_ctn id="link-node236-leaf14"/> </route>
+    <route src="node-237" dst="leaf-14"> <link_ctn id="link-node237-leaf14"/> </route>
+    <route src="node-238" dst="leaf-14"> <link_ctn id="link-node238-leaf14"/> </route>
+    <route src="node-239" dst="leaf-14"> <link_ctn id="link-node239-leaf14"/> </route>
+    <route src="node-240" dst="leaf-15"> <link_ctn id="link-node240-leaf15"/> </route>
+    <route src="node-241" dst="leaf-15"> <link_ctn id="link-node241-leaf15"/> </route>
+    <route src="node-242" dst="leaf-15"> <link_ctn id="link-node242-leaf15"/> </route>
+    <route src="node-243" dst="leaf-15"> <link_ctn id="link-node243-leaf15"/> </route>
+    <route src="node-244" dst="leaf-15"> <link_ctn id="link-node244-leaf15"/> </route>
+    <route src="node-245" dst="leaf-15"> <link_ctn id="link-node245-leaf15"/> </route>
+    <route src="node-246" dst="leaf-15"> <link_ctn id="link-node246-leaf15"/> </route>
+    <route src="node-247" dst="leaf-15"> <link_ctn id="link-node247-leaf15"/> </route>
+    <route src="node-248" dst="leaf-15"> <link_ctn id="link-node248-leaf15"/> </route>
+    <route src="node-249" dst="leaf-15"> <link_ctn id="link-node249-leaf15"/> </route>
+    <route src="node-250" dst="leaf-15"> <link_ctn id="link-node250-leaf15"/> </route>
+    <route src="node-251" dst="leaf-15"> <link_ctn id="link-node251-leaf15"/> </route>
+    <route src="node-252" dst="leaf-15"> <link_ctn id="link-node252-leaf15"/> </route>
+    <route src="node-253" dst="leaf-15"> <link_ctn id="link-node253-leaf15"/> </route>
+    <route src="node-254" dst="leaf-15"> <link_ctn id="link-node254-leaf15"/> </route>
+    <route src="node-255" dst="leaf-15"> <link_ctn id="link-node255-leaf15"/> </route>
+    <route src="leaf-0" dst="spine-0"> <link_ctn id="link-leaf0-spine0"/> </route>
+    <route src="leaf-0" dst="spine-1"> <link_ctn id="link-leaf0-spine1"/> </route>
+    <route src="leaf-0" dst="spine-2"> <link_ctn id="link-leaf0-spine2"/> </route>
+    <route src="leaf-0" dst="spine-3"> <link_ctn id="link-leaf0-spine3"/> </route>
+    <route src="leaf-0" dst="spine-4"> <link_ctn id="link-leaf0-spine4"/> </route>
+    <route src="leaf-0" dst="spine-5"> <link_ctn id="link-leaf0-spine5"/> </route>
+    <route src="leaf-0" dst="spine-6"> <link_ctn id="link-leaf0-spine6"/> </route>
+    <route src="leaf-0" dst="spine-7"> <link_ctn id="link-leaf0-spine7"/> </route>
+    <route src="leaf-0" dst="spine-8"> <link_ctn id="link-leaf0-spine8"/> </route>
+    <route src="leaf-0" dst="spine-9"> <link_ctn id="link-leaf0-spine9"/> </route>
+    <route src="leaf-0" dst="spine-10"> <link_ctn id="link-leaf0-spine10"/> </route>
+    <route src="leaf-0" dst="spine-11"> <link_ctn id="link-leaf0-spine11"/> </route>
+    <route src="leaf-0" dst="spine-12"> <link_ctn id="link-leaf0-spine12"/> </route>
+    <route src="leaf-0" dst="spine-13"> <link_ctn id="link-leaf0-spine13"/> </route>
+    <route src="leaf-0" dst="spine-14"> <link_ctn id="link-leaf0-spine14"/> </route>
+    <route src="leaf-0" dst="spine-15"> <link_ctn id="link-leaf0-spine15"/> </route>
+    <route src="leaf-1" dst="spine-0"> <link_ctn id="link-leaf1-spine0"/> </route>
+    <route src="leaf-1" dst="spine-1"> <link_ctn id="link-leaf1-spine1"/> </route>
+    <route src="leaf-1" dst="spine-2"> <link_ctn id="link-leaf1-spine2"/> </route>
+    <route src="leaf-1" dst="spine-3"> <link_ctn id="link-leaf1-spine3"/> </route>
+    <route src="leaf-1" dst="spine-4"> <link_ctn id="link-leaf1-spine4"/> </route>
+    <route src="leaf-1" dst="spine-5"> <link_ctn id="link-leaf1-spine5"/> </route>
+    <route src="leaf-1" dst="spine-6"> <link_ctn id="link-leaf1-spine6"/> </route>
+    <route src="leaf-1" dst="spine-7"> <link_ctn id="link-leaf1-spine7"/> </route>
+    <route src="leaf-1" dst="spine-8"> <link_ctn id="link-leaf1-spine8"/> </route>
+    <route src="leaf-1" dst="spine-9"> <link_ctn id="link-leaf1-spine9"/> </route>
+    <route src="leaf-1" dst="spine-10"> <link_ctn id="link-leaf1-spine10"/> </route>
+    <route src="leaf-1" dst="spine-11"> <link_ctn id="link-leaf1-spine11"/> </route>
+    <route src="leaf-1" dst="spine-12"> <link_ctn id="link-leaf1-spine12"/> </route>
+    <route src="leaf-1" dst="spine-13"> <link_ctn id="link-leaf1-spine13"/> </route>
+    <route src="leaf-1" dst="spine-14"> <link_ctn id="link-leaf1-spine14"/> </route>
+    <route src="leaf-1" dst="spine-15"> <link_ctn id="link-leaf1-spine15"/> </route>
+    <route src="leaf-2" dst="spine-0"> <link_ctn id="link-leaf2-spine0"/> </route>
+    <route src="leaf-2" dst="spine-1"> <link_ctn id="link-leaf2-spine1"/> </route>
+    <route src="leaf-2" dst="spine-2"> <link_ctn id="link-leaf2-spine2"/> </route>
+    <route src="leaf-2" dst="spine-3"> <link_ctn id="link-leaf2-spine3"/> </route>
+    <route src="leaf-2" dst="spine-4"> <link_ctn id="link-leaf2-spine4"/> </route>
+    <route src="leaf-2" dst="spine-5"> <link_ctn id="link-leaf2-spine5"/> </route>
+    <route src="leaf-2" dst="spine-6"> <link_ctn id="link-leaf2-spine6"/> </route>
+    <route src="leaf-2" dst="spine-7"> <link_ctn id="link-leaf2-spine7"/> </route>
+    <route src="leaf-2" dst="spine-8"> <link_ctn id="link-leaf2-spine8"/> </route>
+    <route src="leaf-2" dst="spine-9"> <link_ctn id="link-leaf2-spine9"/> </route>
+    <route src="leaf-2" dst="spine-10"> <link_ctn id="link-leaf2-spine10"/> </route>
+    <route src="leaf-2" dst="spine-11"> <link_ctn id="link-leaf2-spine11"/> </route>
+    <route src="leaf-2" dst="spine-12"> <link_ctn id="link-leaf2-spine12"/> </route>
+    <route src="leaf-2" dst="spine-13"> <link_ctn id="link-leaf2-spine13"/> </route>
+    <route src="leaf-2" dst="spine-14"> <link_ctn id="link-leaf2-spine14"/> </route>
+    <route src="leaf-2" dst="spine-15"> <link_ctn id="link-leaf2-spine15"/> </route>
+    <route src="leaf-3" dst="spine-0"> <link_ctn id="link-leaf3-spine0"/> </route>
+    <route src="leaf-3" dst="spine-1"> <link_ctn id="link-leaf3-spine1"/> </route>
+    <route src="leaf-3" dst="spine-2"> <link_ctn id="link-leaf3-spine2"/> </route>
+    <route src="leaf-3" dst="spine-3"> <link_ctn id="link-leaf3-spine3"/> </route>
+    <route src="leaf-3" dst="spine-4"> <link_ctn id="link-leaf3-spine4"/> </route>
+    <route src="leaf-3" dst="spine-5"> <link_ctn id="link-leaf3-spine5"/> </route>
+    <route src="leaf-3" dst="spine-6"> <link_ctn id="link-leaf3-spine6"/> </route>
+    <route src="leaf-3" dst="spine-7"> <link_ctn id="link-leaf3-spine7"/> </route>
+    <route src="leaf-3" dst="spine-8"> <link_ctn id="link-leaf3-spine8"/> </route>
+    <route src="leaf-3" dst="spine-9"> <link_ctn id="link-leaf3-spine9"/> </route>
+    <route src="leaf-3" dst="spine-10"> <link_ctn id="link-leaf3-spine10"/> </route>
+    <route src="leaf-3" dst="spine-11"> <link_ctn id="link-leaf3-spine11"/> </route>
+    <route src="leaf-3" dst="spine-12"> <link_ctn id="link-leaf3-spine12"/> </route>
+    <route src="leaf-3" dst="spine-13"> <link_ctn id="link-leaf3-spine13"/> </route>
+    <route src="leaf-3" dst="spine-14"> <link_ctn id="link-leaf3-spine14"/> </route>
+    <route src="leaf-3" dst="spine-15"> <link_ctn id="link-leaf3-spine15"/> </route>
+    <route src="leaf-4" dst="spine-0"> <link_ctn id="link-leaf4-spine0"/> </route>
+    <route src="leaf-4" dst="spine-1"> <link_ctn id="link-leaf4-spine1"/> </route>
+    <route src="leaf-4" dst="spine-2"> <link_ctn id="link-leaf4-spine2"/> </route>
+    <route src="leaf-4" dst="spine-3"> <link_ctn id="link-leaf4-spine3"/> </route>
+    <route src="leaf-4" dst="spine-4"> <link_ctn id="link-leaf4-spine4"/> </route>
+    <route src="leaf-4" dst="spine-5"> <link_ctn id="link-leaf4-spine5"/> </route>
+    <route src="leaf-4" dst="spine-6"> <link_ctn id="link-leaf4-spine6"/> </route>
+    <route src="leaf-4" dst="spine-7"> <link_ctn id="link-leaf4-spine7"/> </route>
+    <route src="leaf-4" dst="spine-8"> <link_ctn id="link-leaf4-spine8"/> </route>
+    <route src="leaf-4" dst="spine-9"> <link_ctn id="link-leaf4-spine9"/> </route>
+    <route src="leaf-4" dst="spine-10"> <link_ctn id="link-leaf4-spine10"/> </route>
+    <route src="leaf-4" dst="spine-11"> <link_ctn id="link-leaf4-spine11"/> </route>
+    <route src="leaf-4" dst="spine-12"> <link_ctn id="link-leaf4-spine12"/> </route>
+    <route src="leaf-4" dst="spine-13"> <link_ctn id="link-leaf4-spine13"/> </route>
+    <route src="leaf-4" dst="spine-14"> <link_ctn id="link-leaf4-spine14"/> </route>
+    <route src="leaf-4" dst="spine-15"> <link_ctn id="link-leaf4-spine15"/> </route>
+    <route src="leaf-5" dst="spine-0"> <link_ctn id="link-leaf5-spine0"/> </route>
+    <route src="leaf-5" dst="spine-1"> <link_ctn id="link-leaf5-spine1"/> </route>
+    <route src="leaf-5" dst="spine-2"> <link_ctn id="link-leaf5-spine2"/> </route>
+    <route src="leaf-5" dst="spine-3"> <link_ctn id="link-leaf5-spine3"/> </route>
+    <route src="leaf-5" dst="spine-4"> <link_ctn id="link-leaf5-spine4"/> </route>
+    <route src="leaf-5" dst="spine-5"> <link_ctn id="link-leaf5-spine5"/> </route>
+    <route src="leaf-5" dst="spine-6"> <link_ctn id="link-leaf5-spine6"/> </route>
+    <route src="leaf-5" dst="spine-7"> <link_ctn id="link-leaf5-spine7"/> </route>
+    <route src="leaf-5" dst="spine-8"> <link_ctn id="link-leaf5-spine8"/> </route>
+    <route src="leaf-5" dst="spine-9"> <link_ctn id="link-leaf5-spine9"/> </route>
+    <route src="leaf-5" dst="spine-10"> <link_ctn id="link-leaf5-spine10"/> </route>
+    <route src="leaf-5" dst="spine-11"> <link_ctn id="link-leaf5-spine11"/> </route>
+    <route src="leaf-5" dst="spine-12"> <link_ctn id="link-leaf5-spine12"/> </route>
+    <route src="leaf-5" dst="spine-13"> <link_ctn id="link-leaf5-spine13"/> </route>
+    <route src="leaf-5" dst="spine-14"> <link_ctn id="link-leaf5-spine14"/> </route>
+    <route src="leaf-5" dst="spine-15"> <link_ctn id="link-leaf5-spine15"/> </route>
+    <route src="leaf-6" dst="spine-0"> <link_ctn id="link-leaf6-spine0"/> </route>
+    <route src="leaf-6" dst="spine-1"> <link_ctn id="link-leaf6-spine1"/> </route>
+    <route src="leaf-6" dst="spine-2"> <link_ctn id="link-leaf6-spine2"/> </route>
+    <route src="leaf-6" dst="spine-3"> <link_ctn id="link-leaf6-spine3"/> </route>
+    <route src="leaf-6" dst="spine-4"> <link_ctn id="link-leaf6-spine4"/> </route>
+    <route src="leaf-6" dst="spine-5"> <link_ctn id="link-leaf6-spine5"/> </route>
+    <route src="leaf-6" dst="spine-6"> <link_ctn id="link-leaf6-spine6"/> </route>
+    <route src="leaf-6" dst="spine-7"> <link_ctn id="link-leaf6-spine7"/> </route>
+    <route src="leaf-6" dst="spine-8"> <link_ctn id="link-leaf6-spine8"/> </route>
+    <route src="leaf-6" dst="spine-9"> <link_ctn id="link-leaf6-spine9"/> </route>
+    <route src="leaf-6" dst="spine-10"> <link_ctn id="link-leaf6-spine10"/> </route>
+    <route src="leaf-6" dst="spine-11"> <link_ctn id="link-leaf6-spine11"/> </route>
+    <route src="leaf-6" dst="spine-12"> <link_ctn id="link-leaf6-spine12"/> </route>
+    <route src="leaf-6" dst="spine-13"> <link_ctn id="link-leaf6-spine13"/> </route>
+    <route src="leaf-6" dst="spine-14"> <link_ctn id="link-leaf6-spine14"/> </route>
+    <route src="leaf-6" dst="spine-15"> <link_ctn id="link-leaf6-spine15"/> </route>
+    <route src="leaf-7" dst="spine-0"> <link_ctn id="link-leaf7-spine0"/> </route>
+    <route src="leaf-7" dst="spine-1"> <link_ctn id="link-leaf7-spine1"/> </route>
+    <route src="leaf-7" dst="spine-2"> <link_ctn id="link-leaf7-spine2"/> </route>
+    <route src="leaf-7" dst="spine-3"> <link_ctn id="link-leaf7-spine3"/> </route>
+    <route src="leaf-7" dst="spine-4"> <link_ctn id="link-leaf7-spine4"/> </route>
+    <route src="leaf-7" dst="spine-5"> <link_ctn id="link-leaf7-spine5"/> </route>
+    <route src="leaf-7" dst="spine-6"> <link_ctn id="link-leaf7-spine6"/> </route>
+    <route src="leaf-7" dst="spine-7"> <link_ctn id="link-leaf7-spine7"/> </route>
+    <route src="leaf-7" dst="spine-8"> <link_ctn id="link-leaf7-spine8"/> </route>
+    <route src="leaf-7" dst="spine-9"> <link_ctn id="link-leaf7-spine9"/> </route>
+    <route src="leaf-7" dst="spine-10"> <link_ctn id="link-leaf7-spine10"/> </route>
+    <route src="leaf-7" dst="spine-11"> <link_ctn id="link-leaf7-spine11"/> </route>
+    <route src="leaf-7" dst="spine-12"> <link_ctn id="link-leaf7-spine12"/> </route>
+    <route src="leaf-7" dst="spine-13"> <link_ctn id="link-leaf7-spine13"/> </route>
+    <route src="leaf-7" dst="spine-14"> <link_ctn id="link-leaf7-spine14"/> </route>
+    <route src="leaf-7" dst="spine-15"> <link_ctn id="link-leaf7-spine15"/> </route>
+    <route src="leaf-8" dst="spine-0"> <link_ctn id="link-leaf8-spine0"/> </route>
+    <route src="leaf-8" dst="spine-1"> <link_ctn id="link-leaf8-spine1"/> </route>
+    <route src="leaf-8" dst="spine-2"> <link_ctn id="link-leaf8-spine2"/> </route>
+    <route src="leaf-8" dst="spine-3"> <link_ctn id="link-leaf8-spine3"/> </route>
+    <route src="leaf-8" dst="spine-4"> <link_ctn id="link-leaf8-spine4"/> </route>
+    <route src="leaf-8" dst="spine-5"> <link_ctn id="link-leaf8-spine5"/> </route>
+    <route src="leaf-8" dst="spine-6"> <link_ctn id="link-leaf8-spine6"/> </route>
+    <route src="leaf-8" dst="spine-7"> <link_ctn id="link-leaf8-spine7"/> </route>
+    <route src="leaf-8" dst="spine-8"> <link_ctn id="link-leaf8-spine8"/> </route>
+    <route src="leaf-8" dst="spine-9"> <link_ctn id="link-leaf8-spine9"/> </route>
+    <route src="leaf-8" dst="spine-10"> <link_ctn id="link-leaf8-spine10"/> </route>
+    <route src="leaf-8" dst="spine-11"> <link_ctn id="link-leaf8-spine11"/> </route>
+    <route src="leaf-8" dst="spine-12"> <link_ctn id="link-leaf8-spine12"/> </route>
+    <route src="leaf-8" dst="spine-13"> <link_ctn id="link-leaf8-spine13"/> </route>
+    <route src="leaf-8" dst="spine-14"> <link_ctn id="link-leaf8-spine14"/> </route>
+    <route src="leaf-8" dst="spine-15"> <link_ctn id="link-leaf8-spine15"/> </route>
+    <route src="leaf-9" dst="spine-0"> <link_ctn id="link-leaf9-spine0"/> </route>
+    <route src="leaf-9" dst="spine-1"> <link_ctn id="link-leaf9-spine1"/> </route>
+    <route src="leaf-9" dst="spine-2"> <link_ctn id="link-leaf9-spine2"/> </route>
+    <route src="leaf-9" dst="spine-3"> <link_ctn id="link-leaf9-spine3"/> </route>
+    <route src="leaf-9" dst="spine-4"> <link_ctn id="link-leaf9-spine4"/> </route>
+    <route src="leaf-9" dst="spine-5"> <link_ctn id="link-leaf9-spine5"/> </route>
+    <route src="leaf-9" dst="spine-6"> <link_ctn id="link-leaf9-spine6"/> </route>
+    <route src="leaf-9" dst="spine-7"> <link_ctn id="link-leaf9-spine7"/> </route>
+    <route src="leaf-9" dst="spine-8"> <link_ctn id="link-leaf9-spine8"/> </route>
+    <route src="leaf-9" dst="spine-9"> <link_ctn id="link-leaf9-spine9"/> </route>
+    <route src="leaf-9" dst="spine-10"> <link_ctn id="link-leaf9-spine10"/> </route>
+    <route src="leaf-9" dst="spine-11"> <link_ctn id="link-leaf9-spine11"/> </route>
+    <route src="leaf-9" dst="spine-12"> <link_ctn id="link-leaf9-spine12"/> </route>
+    <route src="leaf-9" dst="spine-13"> <link_ctn id="link-leaf9-spine13"/> </route>
+    <route src="leaf-9" dst="spine-14"> <link_ctn id="link-leaf9-spine14"/> </route>
+    <route src="leaf-9" dst="spine-15"> <link_ctn id="link-leaf9-spine15"/> </route>
+    <route src="leaf-10" dst="spine-0"> <link_ctn id="link-leaf10-spine0"/> </route>
+    <route src="leaf-10" dst="spine-1"> <link_ctn id="link-leaf10-spine1"/> </route>
+    <route src="leaf-10" dst="spine-2"> <link_ctn id="link-leaf10-spine2"/> </route>
+    <route src="leaf-10" dst="spine-3"> <link_ctn id="link-leaf10-spine3"/> </route>
+    <route src="leaf-10" dst="spine-4"> <link_ctn id="link-leaf10-spine4"/> </route>
+    <route src="leaf-10" dst="spine-5"> <link_ctn id="link-leaf10-spine5"/> </route>
+    <route src="leaf-10" dst="spine-6"> <link_ctn id="link-leaf10-spine6"/> </route>
+    <route src="leaf-10" dst="spine-7"> <link_ctn id="link-leaf10-spine7"/> </route>
+    <route src="leaf-10" dst="spine-8"> <link_ctn id="link-leaf10-spine8"/> </route>
+    <route src="leaf-10" dst="spine-9"> <link_ctn id="link-leaf10-spine9"/> </route>
+    <route src="leaf-10" dst="spine-10"> <link_ctn id="link-leaf10-spine10"/> </route>
+    <route src="leaf-10" dst="spine-11"> <link_ctn id="link-leaf10-spine11"/> </route>
+    <route src="leaf-10" dst="spine-12"> <link_ctn id="link-leaf10-spine12"/> </route>
+    <route src="leaf-10" dst="spine-13"> <link_ctn id="link-leaf10-spine13"/> </route>
+    <route src="leaf-10" dst="spine-14"> <link_ctn id="link-leaf10-spine14"/> </route>
+    <route src="leaf-10" dst="spine-15"> <link_ctn id="link-leaf10-spine15"/> </route>
+    <route src="leaf-11" dst="spine-0"> <link_ctn id="link-leaf11-spine0"/> </route>
+    <route src="leaf-11" dst="spine-1"> <link_ctn id="link-leaf11-spine1"/> </route>
+    <route src="leaf-11" dst="spine-2"> <link_ctn id="link-leaf11-spine2"/> </route>
+    <route src="leaf-11" dst="spine-3"> <link_ctn id="link-leaf11-spine3"/> </route>
+    <route src="leaf-11" dst="spine-4"> <link_ctn id="link-leaf11-spine4"/> </route>
+    <route src="leaf-11" dst="spine-5"> <link_ctn id="link-leaf11-spine5"/> </route>
+    <route src="leaf-11" dst="spine-6"> <link_ctn id="link-leaf11-spine6"/> </route>
+    <route src="leaf-11" dst="spine-7"> <link_ctn id="link-leaf11-spine7"/> </route>
+    <route src="leaf-11" dst="spine-8"> <link_ctn id="link-leaf11-spine8"/> </route>
+    <route src="leaf-11" dst="spine-9"> <link_ctn id="link-leaf11-spine9"/> </route>
+    <route src="leaf-11" dst="spine-10"> <link_ctn id="link-leaf11-spine10"/> </route>
+    <route src="leaf-11" dst="spine-11"> <link_ctn id="link-leaf11-spine11"/> </route>
+    <route src="leaf-11" dst="spine-12"> <link_ctn id="link-leaf11-spine12"/> </route>
+    <route src="leaf-11" dst="spine-13"> <link_ctn id="link-leaf11-spine13"/> </route>
+    <route src="leaf-11" dst="spine-14"> <link_ctn id="link-leaf11-spine14"/> </route>
+    <route src="leaf-11" dst="spine-15"> <link_ctn id="link-leaf11-spine15"/> </route>
+    <route src="leaf-12" dst="spine-0"> <link_ctn id="link-leaf12-spine0"/> </route>
+    <route src="leaf-12" dst="spine-1"> <link_ctn id="link-leaf12-spine1"/> </route>
+    <route src="leaf-12" dst="spine-2"> <link_ctn id="link-leaf12-spine2"/> </route>
+    <route src="leaf-12" dst="spine-3"> <link_ctn id="link-leaf12-spine3"/> </route>
+    <route src="leaf-12" dst="spine-4"> <link_ctn id="link-leaf12-spine4"/> </route>
+    <route src="leaf-12" dst="spine-5"> <link_ctn id="link-leaf12-spine5"/> </route>
+    <route src="leaf-12" dst="spine-6"> <link_ctn id="link-leaf12-spine6"/> </route>
+    <route src="leaf-12" dst="spine-7"> <link_ctn id="link-leaf12-spine7"/> </route>
+    <route src="leaf-12" dst="spine-8"> <link_ctn id="link-leaf12-spine8"/> </route>
+    <route src="leaf-12" dst="spine-9"> <link_ctn id="link-leaf12-spine9"/> </route>
+    <route src="leaf-12" dst="spine-10"> <link_ctn id="link-leaf12-spine10"/> </route>
+    <route src="leaf-12" dst="spine-11"> <link_ctn id="link-leaf12-spine11"/> </route>
+    <route src="leaf-12" dst="spine-12"> <link_ctn id="link-leaf12-spine12"/> </route>
+    <route src="leaf-12" dst="spine-13"> <link_ctn id="link-leaf12-spine13"/> </route>
+    <route src="leaf-12" dst="spine-14"> <link_ctn id="link-leaf12-spine14"/> </route>
+    <route src="leaf-12" dst="spine-15"> <link_ctn id="link-leaf12-spine15"/> </route>
+    <route src="leaf-13" dst="spine-0"> <link_ctn id="link-leaf13-spine0"/> </route>
+    <route src="leaf-13" dst="spine-1"> <link_ctn id="link-leaf13-spine1"/> </route>
+    <route src="leaf-13" dst="spine-2"> <link_ctn id="link-leaf13-spine2"/> </route>
+    <route src="leaf-13" dst="spine-3"> <link_ctn id="link-leaf13-spine3"/> </route>
+    <route src="leaf-13" dst="spine-4"> <link_ctn id="link-leaf13-spine4"/> </route>
+    <route src="leaf-13" dst="spine-5"> <link_ctn id="link-leaf13-spine5"/> </route>
+    <route src="leaf-13" dst="spine-6"> <link_ctn id="link-leaf13-spine6"/> </route>
+    <route src="leaf-13" dst="spine-7"> <link_ctn id="link-leaf13-spine7"/> </route>
+    <route src="leaf-13" dst="spine-8"> <link_ctn id="link-leaf13-spine8"/> </route>
+    <route src="leaf-13" dst="spine-9"> <link_ctn id="link-leaf13-spine9"/> </route>
+    <route src="leaf-13" dst="spine-10"> <link_ctn id="link-leaf13-spine10"/> </route>
+    <route src="leaf-13" dst="spine-11"> <link_ctn id="link-leaf13-spine11"/> </route>
+    <route src="leaf-13" dst="spine-12"> <link_ctn id="link-leaf13-spine12"/> </route>
+    <route src="leaf-13" dst="spine-13"> <link_ctn id="link-leaf13-spine13"/> </route>
+    <route src="leaf-13" dst="spine-14"> <link_ctn id="link-leaf13-spine14"/> </route>
+    <route src="leaf-13" dst="spine-15"> <link_ctn id="link-leaf13-spine15"/> </route>
+    <route src="leaf-14" dst="spine-0"> <link_ctn id="link-leaf14-spine0"/> </route>
+    <route src="leaf-14" dst="spine-1"> <link_ctn id="link-leaf14-spine1"/> </route>
+    <route src="leaf-14" dst="spine-2"> <link_ctn id="link-leaf14-spine2"/> </route>
+    <route src="leaf-14" dst="spine-3"> <link_ctn id="link-leaf14-spine3"/> </route>
+    <route src="leaf-14" dst="spine-4"> <link_ctn id="link-leaf14-spine4"/> </route>
+    <route src="leaf-14" dst="spine-5"> <link_ctn id="link-leaf14-spine5"/> </route>
+    <route src="leaf-14" dst="spine-6"> <link_ctn id="link-leaf14-spine6"/> </route>
+    <route src="leaf-14" dst="spine-7"> <link_ctn id="link-leaf14-spine7"/> </route>
+    <route src="leaf-14" dst="spine-8"> <link_ctn id="link-leaf14-spine8"/> </route>
+    <route src="leaf-14" dst="spine-9"> <link_ctn id="link-leaf14-spine9"/> </route>
+    <route src="leaf-14" dst="spine-10"> <link_ctn id="link-leaf14-spine10"/> </route>
+    <route src="leaf-14" dst="spine-11"> <link_ctn id="link-leaf14-spine11"/> </route>
+    <route src="leaf-14" dst="spine-12"> <link_ctn id="link-leaf14-spine12"/> </route>
+    <route src="leaf-14" dst="spine-13"> <link_ctn id="link-leaf14-spine13"/> </route>
+    <route src="leaf-14" dst="spine-14"> <link_ctn id="link-leaf14-spine14"/> </route>
+    <route src="leaf-14" dst="spine-15"> <link_ctn id="link-leaf14-spine15"/> </route>
+    <route src="leaf-15" dst="spine-0"> <link_ctn id="link-leaf15-spine0"/> </route>
+    <route src="leaf-15" dst="spine-1"> <link_ctn id="link-leaf15-spine1"/> </route>
+    <route src="leaf-15" dst="spine-2"> <link_ctn id="link-leaf15-spine2"/> </route>
+    <route src="leaf-15" dst="spine-3"> <link_ctn id="link-leaf15-spine3"/> </route>
+    <route src="leaf-15" dst="spine-4"> <link_ctn id="link-leaf15-spine4"/> </route>
+    <route src="leaf-15" dst="spine-5"> <link_ctn id="link-leaf15-spine5"/> </route>
+    <route src="leaf-15" dst="spine-6"> <link_ctn id="link-leaf15-spine6"/> </route>
+    <route src="leaf-15" dst="spine-7"> <link_ctn id="link-leaf15-spine7"/> </route>
+    <route src="leaf-15" dst="spine-8"> <link_ctn id="link-leaf15-spine8"/> </route>
+    <route src="leaf-15" dst="spine-9"> <link_ctn id="link-leaf15-spine9"/> </route>
+    <route src="leaf-15" dst="spine-10"> <link_ctn id="link-leaf15-spine10"/> </route>
+    <route src="leaf-15" dst="spine-11"> <link_ctn id="link-leaf15-spine11"/> </route>
+    <route src="leaf-15" dst="spine-12"> <link_ctn id="link-leaf15-spine12"/> </route>
+    <route src="leaf-15" dst="spine-13"> <link_ctn id="link-leaf15-spine13"/> </route>
+    <route src="leaf-15" dst="spine-14"> <link_ctn id="link-leaf15-spine14"/> </route>
+    <route src="leaf-15" dst="spine-15"> <link_ctn id="link-leaf15-spine15"/> </route>
+
+  </zone>
+</platform>
