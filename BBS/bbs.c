@@ -180,7 +180,7 @@ static double run_bbs(void *buf, int count, int rank, int size,
          * Threshold: 256KB.
          * Shallow tree only supports N=128 (hardcoded offsets). */
         int is_dfly = (strcmp(topo_name, "Dragonfly") == 0);
-        int use_shallow = is_dfly && (count < 262144) && (size == 128);
+        int use_shallow = is_dfly && (count <= 262144);
         snprintf(bbs_path, sizeof(bbs_path),
                  "%s/encodings/%s/N=%d/R%d%s.bbs", proj_root, topo_name, size,
                  root, use_shallow ? "s" : "");
@@ -223,24 +223,9 @@ static double run_bbs(void *buf, int count, int rank, int size,
     if (nchunks > 0) {
         k = nchunks;
     } else {
-        /* Auto-chunk: k = sqrt(a * n / (b * L * B))
-         * a = tree depth, n = msg bytes, b = union_degree/tau,
-         * L = effective per-hop latency, B = effective per-hop bandwidth.
-         * For dragonfly (tau=2, union_degree=4): b=2, L≈0.4µs, B≈3.75 GBps.
-         * Calibrated from measurements: L*B ≈ 1500 bytes. */
-        int a = rt.depth > 0 ? rt.depth : 1;
-        double b = 2.0;           /* union_degree / tau = 4/2 */
-        double LB = 1500.0;       /* L * B in bytes (0.4µs × 3.75 GBps) */
-        double kf = sqrt((double)a * count / (b * LB));
-        k = (int)(kf + 0.5);
+        /* Auto-chunk: target 8KB chunks */
+        k = count / 8192;
         if (k < 1) k = 1;
-        if (k > count) k = count;
-        /* Round to nearest power of 2 for clean chunk sizes */
-        int kp = 1;
-        while (kp * 2 <= k) kp *= 2;
-        if (k - kp > kp * 2 - k) kp *= 2;
-        k = kp;
-        if (k > count) k = count;
     }
     int base_chunk = count / k;
     int leftover   = count % k;

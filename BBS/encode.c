@@ -928,82 +928,18 @@ static void dfly_build_interleaved_tree(int16_t *tree, int root, int N)
 /* Shallow relay-pair trees (depth ≈ 9).
  * Binary-dissemination at each level: group, chassis, router, sibling.
  * Good for small messages where low depth dominates. */
-static void dfly_build_phased_relay_pair(int16_t *t0, int16_t *t1,
-                                          int root, int N)
-{
-    (void)root; (void)N;
-    for (int i = 0; i < 128; i++) { t0[i] = -1; t1[i] = -1; }
-
-    /* GROUP LEVEL:
-     * T0: G0→G1, G1→{G2,G3}  (G1 relay)
-     * T1: G0→G2, G2→{G1,G3}  (G2 relay) */
-    t0[32]  = 0;    t0[64]  = 32;   t0[96]  = 32;
-    t1[64]  = 0;    t1[32]  = 64;   t1[96]  = 64;
-
-    /* Group delegates (rep → sibling for local chassis/router work) */
-    for (int g = 0; g < 4; g++) {
-        int rep = g * 32;
-        t0[rep + 1] = rep;
-        t1[rep + 1] = rep;
-    }
-
-    /* CHASSIS LEVEL per group:
-     * T0: del→C1, C1→{C2,C3}
-     * T1: del→C2, C2→{C1,C3} */
-    for (int g = 0; g < 4; g++) {
-        int del = g*32 + 1;
-        t0[g*32 + 8]  = del;            /* C0→C1 */
-        t0[g*32 + 16] = g*32 + 8;       /* C1→C2 (relay) */
-        t0[g*32 + 24] = g*32 + 8;       /* C1→C3 (relay) */
-
-        t1[g*32 + 16] = del;            /* C0→C2 */
-        t1[g*32 + 8]  = g*32 + 16;      /* C2→C1 (relay) */
-        t1[g*32 + 24] = g*32 + 16;      /* C2→C3 (relay) */
-    }
-
-    /* Chassis delegates for C1,C2,C3 (rep → sibling for router work) */
-    for (int g = 0; g < 4; g++)
-        for (int c = 1; c < 4; c++) {
-            int crep = g*32 + c*8;
-            t0[crep + 1] = crep;
-            t1[crep + 1] = crep;
-        }
-
-    /* ROUTER LEVEL per chassis:
-     * T0: del→R1, R1→{R2,R3}
-     * T1: del→R2, R2→{R1,R3} */
-    for (int g = 0; g < 4; g++)
-        for (int c = 0; c < 4; c++) {
-            int del = (c == 0) ? g*32 + 1 : g*32 + c*8 + 1;
-            int cb  = g*32 + c*8;
-
-            t0[cb + 2] = del;           /* R0→R1 */
-            t0[cb + 4] = cb + 2;        /* R1→R2 (relay) */
-            t0[cb + 6] = cb + 2;        /* R1→R3 (relay) */
-
-            t1[cb + 4] = del;           /* R0→R2 */
-            t1[cb + 2] = cb + 4;        /* R2→R1 (relay) */
-            t1[cb + 6] = cb + 4;        /* R2→R3 (relay) */
-        }
-
-    /* SIBLING LEVEL: each non-R0 router rep → its sibling */
-    for (int g = 0; g < 4; g++)
-        for (int c = 0; c < 4; c++)
-            for (int r = 1; r < 4; r++) {
-                int rrep = g*32 + c*8 + r*2;
-                t0[rrep + 1] = rrep;
-                t1[rrep + 1] = rrep;
-            }
-
-    if (root != 0)
-        fprintf(stderr, "DFLY: WARNING: phased relay only supports root=0\n");
-}
-
-/* Deep hierarchical trees (depth ≈ 53).
+/* Hierarchical trees with K4 relay pattern at each level.
  * K4 relay pattern at each level: node, router, chassis, group.
- * Better pipeline throughput for large messages. */
+ * Better pipeline throughput for large messages.
+ *
+ * shallow=0 (deep):    cross-level edges go leaf(src) → root(dst).
+ *                      Data traverses full sub-tree before crossing levels.
+ *                      Deeper tree, better pipeline throughput.
+ * shallow=1 (shallow): cross-level edges go root(src) → root(dst).
+ *                      Root fans out to both sub-tree children and next level.
+ *                      Shallower tree, lower startup latency. */
 static void dfly_build_hierarchical_trees(int16_t *t0, int16_t *t1,
-                                           int root, int N)
+                                           int root, int N, int shallow)
 {
     int npn = N / 64;           /* nodes per router */
     int n_rtrs = N / npn;       /* 64 */
@@ -1112,14 +1048,15 @@ static void dfly_build_hierarchical_trees(int16_t *t0, int16_t *t1,
         rpar[0][interior[0]] = rr;  rpar[0][interior[1]] = interior[0];  rpar[0][rl] = interior[0];
         rpar[1][interior[1]] = rr;  rpar[1][interior[0]] = interior[1];  rpar[1][rl] = interior[1];
 
-        /* Connect: for each router-tree edge, add node-to-node tree edge */
+        /* Connect: for each router-tree edge, add node-to-node tree edge.
+         * Deep: leaf(src) → root(dst).  Shallow: root(src) → root(dst). */
         int16_t *tt[2] = { t0, t1 };
         for (int t = 0; t < 2; t++)
             for (int r = 0; r < NROUTERS; r++) {
                 if (rpar[t][r] < 0) continue;
                 int dst = ch * NROUTERS + r;
                 int src = ch * NROUTERS + rpar[t][r];
-                tt[t][rnode[dst]] = (int16_t)lnode[src];
+                tt[t][rnode[dst]] = (int16_t)(shallow ? rnode[src] : lnode[src]);
             }
     }
 
@@ -1144,8 +1081,10 @@ static void dfly_build_hierarchical_trees(int16_t *t0, int16_t *t1,
                 int dst_ch = g * NCHASSIS + c;
                 int src_ch = g * NCHASSIS + cpar[t][c];
                 int dst_rtr = dst_ch * NROUTERS + rrouter[dst_ch];
-                int src_rtr = src_ch * NROUTERS + lrouter[src_ch];
-                tt[t][rnode[dst_rtr]] = (int16_t)lnode[src_rtr];
+                int src_rtr = src_ch * NROUTERS +
+                    (shallow ? rrouter[src_ch] : lrouter[src_ch]);
+                tt[t][rnode[dst_rtr]] =
+                    (int16_t)(shallow ? rnode[src_rtr] : lnode[src_rtr]);
             }
     }
 
@@ -1167,11 +1106,14 @@ static void dfly_build_hierarchical_trees(int16_t *t0, int16_t *t1,
             for (int g = 0; g < NGROUPS; g++) {
                 if (gpar[t][g] < 0) continue;
                 int sg = gpar[t][g];
-                int src_ch  = sg * NCHASSIS + lchassis[sg];
-                int src_rtr = src_ch * NROUTERS + lrouter[src_ch];
+                int src_ch  = sg * NCHASSIS +
+                    (shallow ? rchassis[sg] : lchassis[sg]);
+                int src_rtr = src_ch * NROUTERS +
+                    (shallow ? rrouter[src_ch] : lrouter[src_ch]);
                 int dst_ch  = g * NCHASSIS + rchassis[g];
                 int dst_rtr = dst_ch * NROUTERS + rrouter[dst_ch];
-                tt[t][rnode[dst_rtr]] = (int16_t)lnode[src_rtr];
+                tt[t][rnode[dst_rtr]] =
+                    (int16_t)(shallow ? rnode[src_rtr] : lnode[src_rtr]);
             }
     }
 }
@@ -1203,10 +1145,8 @@ static int dragonfly_compute_trees(const char *topo_file, int root, int N,
     /* Select tree variant based on dfly_shallow flag.
      * Shallow (depth≈9): better for small messages (low startup latency).
      * Deep    (depth≈53): better for large messages (higher pipeline BW). */
-    if (dfly_use_shallow)
-        dfly_build_phased_relay_pair(trees[0], trees[1], root, N);
-    else
-        dfly_build_hierarchical_trees(trees[0], trees[1], root, N);
+    dfly_build_hierarchical_trees(trees[0], trees[1], root, N,
+                                   dfly_use_shallow ? 1 : 0);
 
     dfly_print_stats(trees, tau, root, N, td.lat);
     fprintf(stderr, "DFLY: tau=%d variant=%s\n", tau,
