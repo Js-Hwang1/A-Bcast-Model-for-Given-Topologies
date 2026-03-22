@@ -96,15 +96,17 @@ static topo_type_t detect_topo_type(const int *node_deg, int N)
             return BBS_TOPO_BUTTERFLY;
     }
 
+    /* Dragonfly: all compute nodes have same degree = npn-1 in 1-hop
+     * adjacency (connected to sibling nodes on the same router).
+     * N=128 (npn=2) → deg=1, N=256 (npn=4) → deg=3, etc.
+     * Must be N = 64*npn with npn = min_deg+1.
+     * Check BEFORE mesh since npn=4 dragonfly has deg=3 which overlaps mesh range. */
+    if (min_deg == max_deg && N >= 8 && N % 64 == 0 && N / 64 == min_deg + 1)
+        return BBS_TOPO_DRAGONFLY;
+
     /* 2D mesh: min degree 2 (corners), max degree 4 (interior) */
     if (min_deg >= 2 && max_deg <= 4)
         return BBS_TOPO_MESH;
-
-    /* Dragonfly: all compute nodes have degree 1 in 1-hop adjacency
-     * (only connected to their router sibling via a single uplink).
-     * With P=2 nodes per router, each node sees exactly 1 neighbor. */
-    if (min_deg == 1 && max_deg == 1 && N >= 8)
-        return BBS_TOPO_DRAGONFLY;
 
     /* TODO: FatTree detection heuristics */
     return BBS_TOPO_UNKNOWN;
@@ -505,11 +507,13 @@ static void build_seed_diffuse(int par, int *nodes, int cnt,
  */
 
 /* Dragonfly hierarchy extraction from node IDs.
- * Topology: 4 groups × 4 chassis × 4 routers × 2 nodes = 128.
- * node i → group i/32, chassis (i%32)/8, router (i%8)/2, sibling i^1 */
-#define DFLY_GROUP(v)   ((v) / 32)
-#define DFLY_CHASSIS(v) (((v) % 32) / 8)
-#define DFLY_ROUTER(v)  (((v) % 8) / 2)
+ * Topology: 4 groups × 4 chassis × 4 routers × npn nodes.
+ * N=128 → npn=2, N=256 → npn=4, etc. */
+static int dfly_npn = 2;         /* nodes per router — set in dragonfly_compute_trees */
+static int dfly_use_shallow = 0; /* 0 = deep hierarchical, 1 = shallow relay pair */
+#define DFLY_GROUP(v)   ((v) / (dfly_npn * 16))
+#define DFLY_CHASSIS(v) (((v) % (dfly_npn * 16)) / (dfly_npn * 4))
+#define DFLY_ROUTER(v)  (((v) % (dfly_npn * 4)) / dfly_npn)
 #define DFLY_SIBLING(v) ((v) ^ 1)
 #define NGROUPS 4
 #define NCHASSIS 4
@@ -901,25 +905,29 @@ static void dfly_build_interleaved_tree(int16_t *tree, int root, int N)
         fprintf(stderr, "DFLY: WARNING: interleaved tree only supports root=0\n");
 }
 
-/* Build tau=2 phase-isolated relay trees.
+/* Build tau=2 hierarchical anti-correlated trees for dragonfly.
  *
- * Relay pattern at each hierarchy level:
- *   T0: 0 → 1 → {2, 3}    (entity 1 is the relay)
- *   T1: 0 → 2 → {1, 3}    (entity 2 is the relay)
+ * Algorithm (from algorithm.txt):
+ *   0. Identify root/leaf at every level (node, router, chassis, group)
+ *      based on the broadcast root — no renumbering.
+ *   1. Node level:  within each router, T0=T1=root→leaf (npn=2 degenerate).
+ *   2. Router level: K4 relay on 4 routers per chassis.
+ *   3. Connect: leaf_node(src_router) → root_node(dst_router).
+ *   4. Chassis level: K4 relay on 4 chassis per group.
+ *   5. Connect: leaf_node(leaf_router(src_ch)) → root_node(root_router(dst_ch)).
+ *   6. Group level: K4 relay on 4 groups.
+ *   7. Connect: leaf_node(leaf_rtr(leaf_ch(src_g))) → root_node(root_rtr(root_ch(dst_g))).
  *
- * Phase isolation: each hierarchy level's rep delegates LOCAL work
- * to its SIBLING.  The relay node (e.g., G1 rep) has ONLY group-level
- * children — no chassis/router/sibling children.  This prevents
- * bandwidth sharing between hierarchy levels at relay nodes.
+ * K4 relay pattern (root=R, leaf=L, interior={I0,I1} sorted):
+ *   T0: R → I0 → {I1, L}
+ *   T1: R → I1 → {I0, L}
+ *   L is leaf in BOTH trees.  Anti-correlation on I0/I1.
  *
- * Structure per tree:
- *   Group:   G0 → G1_rep → {G2_rep, G3_rep}     (relay, fan≤3 with delegate)
- *            Each G_rep → sibling (delegate for local chassis/router work)
- *   Chassis: delegate → C1_rep → {C2_rep, C3_rep} (relay within group)
- *            Each C_rep → sibling (delegate for local router work)
- *   Router:  delegate → R1_rep → {R2_rep, R3_rep} (relay within chassis)
- *   Sibling: R_rep → sibling_node
+ * Max union degree = 2*tau = 4 across all N nodes.
  */
+/* Shallow relay-pair trees (depth ≈ 9).
+ * Binary-dissemination at each level: group, chassis, router, sibling.
+ * Good for small messages where low depth dominates. */
 static void dfly_build_phased_relay_pair(int16_t *t0, int16_t *t1,
                                           int root, int N)
 {
@@ -928,8 +936,7 @@ static void dfly_build_phased_relay_pair(int16_t *t0, int16_t *t1,
 
     /* GROUP LEVEL:
      * T0: G0→G1, G1→{G2,G3}  (G1 relay)
-     * T1: G0→G2, G2→{G1,G3}  (G2 relay)
-     * Plus: each group rep → sibling delegate for local work. */
+     * T1: G0→G2, G2→{G1,G3}  (G2 relay) */
     t0[32]  = 0;    t0[64]  = 32;   t0[96]  = 32;
     t1[64]  = 0;    t1[32]  = 64;   t1[96]  = 64;
 
@@ -941,7 +948,6 @@ static void dfly_build_phased_relay_pair(int16_t *t0, int16_t *t1,
     }
 
     /* CHASSIS LEVEL per group:
-     * From the group's sibling delegate (g*32+1).
      * T0: del→C1, C1→{C2,C3}
      * T1: del→C2, C2→{C1,C3} */
     for (int g = 0; g < 4; g++) {
@@ -965,9 +971,7 @@ static void dfly_build_phased_relay_pair(int16_t *t0, int16_t *t1,
 
     /* ROUTER LEVEL per chassis:
      * T0: del→R1, R1→{R2,R3}
-     * T1: del→R2, R2→{R1,R3}
-     * For C0: delegate = group sibling (g*32+1)
-     * For C1-C3: delegate = chassis sibling (g*32+c*8+1) */
+     * T1: del→R2, R2→{R1,R3} */
     for (int g = 0; g < 4; g++)
         for (int c = 0; c < 4; c++) {
             int del = (c == 0) ? g*32 + 1 : g*32 + c*8 + 1;
@@ -995,6 +999,183 @@ static void dfly_build_phased_relay_pair(int16_t *t0, int16_t *t1,
         fprintf(stderr, "DFLY: WARNING: phased relay only supports root=0\n");
 }
 
+/* Deep hierarchical trees (depth ≈ 53).
+ * K4 relay pattern at each level: node, router, chassis, group.
+ * Better pipeline throughput for large messages. */
+static void dfly_build_hierarchical_trees(int16_t *t0, int16_t *t1,
+                                           int root, int N)
+{
+    int npn = N / 64;           /* nodes per router */
+    int n_rtrs = N / npn;       /* 64 */
+    int n_ch   = n_rtrs / NROUTERS;  /* 16 */
+    (void)n_ch;
+
+    for (int i = 0; i < N; i++) { t0[i] = -1; t1[i] = -1; }
+
+    int root_g = DFLY_GROUP(root);
+    int root_c = DFLY_CHASSIS(root);
+    int root_r = DFLY_ROUTER(root);
+
+    /* --- Step 0: Root/Leaf identification (before any tree generation) --- */
+
+    /* Per-router: root_node / leaf_node (compute node IDs) */
+    int rnode[64], lnode[64];
+    for (int rtr = 0; rtr < n_rtrs; rtr++) {
+        int base = rtr * npn;
+        int g = rtr / 16, cl = (rtr % 16) / 4, rl = rtr % 4;
+        if (g == root_g && cl == root_c && rl == root_r) {
+            rnode[rtr] = root;
+            lnode[rtr] = (npn == 2)
+                ? (root == base ? base + 1 : base)
+                : (root == base + npn - 1 ? base + npn - 2 : base + npn - 1);
+        } else {
+            rnode[rtr] = base;
+            lnode[rtr] = base + npn - 1;
+        }
+    }
+
+    /* Per-chassis: root/leaf router (local index 0..3) */
+    int rrouter[16], lrouter[16];
+    for (int ch = 0; ch < 16; ch++) {
+        int g = ch / 4, cl = ch % 4;
+        if (g == root_g && cl == root_c) {
+            rrouter[ch] = root_r;
+            lrouter[ch] = (root_r == NROUTERS - 1)
+                           ? NROUTERS - 2 : NROUTERS - 1;
+        } else {
+            rrouter[ch] = 0;
+            lrouter[ch] = NROUTERS - 1;
+        }
+    }
+
+    /* Per-group: root/leaf chassis (local index 0..3) */
+    int rchassis[NGROUPS], lchassis[NGROUPS];
+    for (int g = 0; g < NGROUPS; g++) {
+        if (g == root_g) {
+            rchassis[g] = root_c;
+            lchassis[g] = (root_c == NCHASSIS - 1)
+                           ? NCHASSIS - 2 : NCHASSIS - 1;
+        } else {
+            rchassis[g] = 0;
+            lchassis[g] = NCHASSIS - 1;
+        }
+    }
+
+    /* Global: root/leaf group */
+    int lgroup = (root_g == NGROUPS - 1) ? NGROUPS - 2 : NGROUPS - 1;
+
+    /* --- Step 1: Node-level trees (within each router) --- */
+    for (int rtr = 0; rtr < n_rtrs; rtr++) {
+        int rn = rnode[rtr], ln = lnode[rtr];
+        if (npn == 2) {
+            t0[ln] = (int16_t)rn;
+            t1[ln] = (int16_t)rn;
+        } else if (npn >= 4) {
+            int base = rtr * npn;
+            int interior[62], ni = 0;
+            for (int i = base; i < base + npn; i++)
+                if (i != rn && i != ln) interior[ni++] = i;
+            if (ni == 2) {
+                /* K4 relay */
+                t0[interior[0]] = (int16_t)rn;
+                t0[interior[1]] = (int16_t)interior[0];
+                t0[ln]          = (int16_t)interior[0];
+                t1[interior[1]] = (int16_t)rn;
+                t1[interior[0]] = (int16_t)interior[1];
+                t1[ln]          = (int16_t)interior[1];
+            } else {
+                /* npn>4 chain fallback */
+                int prev = rn;
+                for (int i = 0; i < ni; i++) {
+                    t0[interior[i]] = (int16_t)prev;
+                    t1[interior[i]] = (int16_t)prev;
+                    prev = interior[i];
+                }
+                t0[ln] = (int16_t)prev;
+                t1[ln] = (int16_t)prev;
+            }
+        }
+    }
+
+    /* --- Steps 2+3: Router-level trees + connect to node trees --- */
+    for (int ch = 0; ch < 16; ch++) {
+        int rr = rrouter[ch], rl = lrouter[ch];
+        int interior[2], ni = 0;
+        for (int r = 0; r < NROUTERS; r++)
+            if (r != rr && r != rl) interior[ni++] = r;
+        if (interior[0] > interior[1])
+            { int tmp = interior[0]; interior[0] = interior[1]; interior[1] = tmp; }
+
+        /* K4 relay: T0: root→I0→{I1,leaf}, T1: root→I1→{I0,leaf} */
+        int rpar[2][NROUTERS];
+        for (int r = 0; r < NROUTERS; r++) { rpar[0][r] = -1; rpar[1][r] = -1; }
+        rpar[0][interior[0]] = rr;  rpar[0][interior[1]] = interior[0];  rpar[0][rl] = interior[0];
+        rpar[1][interior[1]] = rr;  rpar[1][interior[0]] = interior[1];  rpar[1][rl] = interior[1];
+
+        /* Connect: for each router-tree edge, add node-to-node tree edge */
+        int16_t *tt[2] = { t0, t1 };
+        for (int t = 0; t < 2; t++)
+            for (int r = 0; r < NROUTERS; r++) {
+                if (rpar[t][r] < 0) continue;
+                int dst = ch * NROUTERS + r;
+                int src = ch * NROUTERS + rpar[t][r];
+                tt[t][rnode[dst]] = (int16_t)lnode[src];
+            }
+    }
+
+    /* --- Steps 4+5: Chassis-level trees + connect --- */
+    for (int g = 0; g < NGROUPS; g++) {
+        int rc = rchassis[g], lc = lchassis[g];
+        int interior[2], ni = 0;
+        for (int c = 0; c < NCHASSIS; c++)
+            if (c != rc && c != lc) interior[ni++] = c;
+        if (interior[0] > interior[1])
+            { int tmp = interior[0]; interior[0] = interior[1]; interior[1] = tmp; }
+
+        int cpar[2][NCHASSIS];
+        for (int c = 0; c < NCHASSIS; c++) { cpar[0][c] = -1; cpar[1][c] = -1; }
+        cpar[0][interior[0]] = rc;  cpar[0][interior[1]] = interior[0];  cpar[0][lc] = interior[0];
+        cpar[1][interior[1]] = rc;  cpar[1][interior[0]] = interior[1];  cpar[1][lc] = interior[1];
+
+        int16_t *tt[2] = { t0, t1 };
+        for (int t = 0; t < 2; t++)
+            for (int c = 0; c < NCHASSIS; c++) {
+                if (cpar[t][c] < 0) continue;
+                int dst_ch = g * NCHASSIS + c;
+                int src_ch = g * NCHASSIS + cpar[t][c];
+                int dst_rtr = dst_ch * NROUTERS + rrouter[dst_ch];
+                int src_rtr = src_ch * NROUTERS + lrouter[src_ch];
+                tt[t][rnode[dst_rtr]] = (int16_t)lnode[src_rtr];
+            }
+    }
+
+    /* --- Steps 6+7: Group-level trees + connect --- */
+    {
+        int interior[2], ni = 0;
+        for (int g = 0; g < NGROUPS; g++)
+            if (g != root_g && g != lgroup) interior[ni++] = g;
+        if (interior[0] > interior[1])
+            { int tmp = interior[0]; interior[0] = interior[1]; interior[1] = tmp; }
+
+        int gpar[2][NGROUPS];
+        for (int g = 0; g < NGROUPS; g++) { gpar[0][g] = -1; gpar[1][g] = -1; }
+        gpar[0][interior[0]] = root_g;  gpar[0][interior[1]] = interior[0];  gpar[0][lgroup] = interior[0];
+        gpar[1][interior[1]] = root_g;  gpar[1][interior[0]] = interior[1];  gpar[1][lgroup] = interior[1];
+
+        int16_t *tt[2] = { t0, t1 };
+        for (int t = 0; t < 2; t++)
+            for (int g = 0; g < NGROUPS; g++) {
+                if (gpar[t][g] < 0) continue;
+                int sg = gpar[t][g];
+                int src_ch  = sg * NCHASSIS + lchassis[sg];
+                int src_rtr = src_ch * NROUTERS + lrouter[src_ch];
+                int dst_ch  = g * NCHASSIS + rchassis[g];
+                int dst_rtr = dst_ch * NROUTERS + rrouter[dst_ch];
+                tt[t][rnode[dst_rtr]] = (int16_t)lnode[src_rtr];
+            }
+    }
+}
+
 static int dragonfly_compute_trees(const char *topo_file, int root, int N,
                                    const char *adj, const uint16_t *flink,
                                    int max_fl, const int *bfs_order, int bfs_n,
@@ -1004,6 +1185,8 @@ static int dragonfly_compute_trees(const char *topo_file, int root, int N,
     (void)adj; (void)flink; (void)max_fl;
     (void)bfs_order; (void)bfs_n; (void)depth0;
 
+    dfly_npn = N / 64;  /* nodes per router: N=128→2, N=256→4 */
+
     topo_data_t td;
     if (topo_data_load(topo_file, &td) != 0) {
         fprintf(stderr, "DFLY: cannot load tdat\n");
@@ -1011,39 +1194,316 @@ static int dragonfly_compute_trees(const char *topo_file, int root, int N,
         return -1;
     }
 
-    fprintf(stderr, "DFLY: root=%d group=%d chassis=%d router=%d\n",
-            root, DFLY_GROUP(root), DFLY_CHASSIS(root), DFLY_ROUTER(root));
+    fprintf(stderr, "DFLY: root=%d group=%d chassis=%d router=%d npn=%d\n",
+            root, DFLY_GROUP(root), DFLY_CHASSIS(root), DFLY_ROUTER(root), dfly_npn);
 
     int tau = 2;
     int16_t *trees[2] = { parent_arrays, parent_arrays + N };
 
-    /* Tau=2 relay pair: anti-correlated trees with depth=7.
-     * T0: 0→1→{2,3} pattern at each hierarchy level.
-     * T1: 0→2→{1,3} pattern (relay node swapped). */
-    dfly_build_phased_relay_pair(trees[0], trees[1], root, N);
+    /* Select tree variant based on dfly_shallow flag.
+     * Shallow (depth≈9): better for small messages (low startup latency).
+     * Deep    (depth≈53): better for large messages (higher pipeline BW). */
+    if (dfly_use_shallow)
+        dfly_build_phased_relay_pair(trees[0], trees[1], root, N);
+    else
+        dfly_build_hierarchical_trees(trees[0], trees[1], root, N);
 
     dfly_print_stats(trees, tau, root, N, td.lat);
-    fprintf(stderr, "DFLY: tau=%d\n", tau);
+    fprintf(stderr, "DFLY: tau=%d variant=%s\n", tau,
+            dfly_use_shallow ? "shallow" : "deep");
 
     *out_tau = tau;
     topo_data_free(&td);
     return 0;
 }
 
-/* ---- FatTree tree builder (stub) ---- */
+/* ---- FatTree tree builder (tau=2, two-layer anti-correlated binary trees) ----
+ *
+ * Uses leaf/spine switch hosts as MPI relay ranks for explicit routing.
+ * Rank mapping (for Nc compute, Nl leaf, Ns spine):
+ *   0 .. Nc-1           : compute nodes
+ *   Nc .. Nc+Nl-1       : leaf switches
+ *   Nc+Nl .. Nc+Nl+Ns-1 : spine switches
+ *
+ * Layer 1 (intra-leaf): two hardcoded anti-correlated binary spanning trees
+ * over the 16 compute nodes within each leaf router.
+ *   - Abstract pos 0 = ingress (receives from leaf switch)
+ *   - Abstract pos 15 = egress (sends to leaf switch / spines)
+ *   - Max union degree = 4
+ *
+ * Layer 2 (inter-leaf): two anti-correlated binary spanning trees over the
+ * Nl leaf routers, routed through explicit spine relays.
+ *   - T1: standard binary tree parent(p) = p/2
+ *   - T2: permuted — T1 leaves ↔ T1 internals, root and last node fixed
+ *   - Spine assignment: spine = (parent_al + t * Ns/2) % Ns
+ *     Anti-correlated: T1 and T2 use different spines for same parent.
+ *
+ * Inter-leaf edge (parent_leaf → child_leaf via spine S):
+ *   egress(pos15) → leaf_switch(parent) → spine_S → leaf_switch(child) → ingress(pos0)
+ *   [Root's leaf uses leaf_switch as relay; non-root leaves egress→spine directly]
+ */
+
+/* Hardcoded 16-node intra-leaf parent arrays */
+static const int8_t FT_INTRA_T1[16] = {-1, 0, 1, 1, 5, 2, 2, 6, 5, 3, 3, 6, 9, 9, 10, 10};
+static const int8_t FT_INTRA_T2[16] = {-1, 7, 7, 11, 0, 11, 13, 8, 4, 14, 13, 8, 4, 12, 12, 14};
+
+/* Inter-leaf T2 permutation: map position → node */
+static int ft_inter_node_of(int pos, int Nl) {
+    int half = Nl / 2;
+    if (pos == 0) return 0;
+    if (pos >= 1 && pos <= half - 1) return half + pos - 1;
+    if (pos >= half && pos <= Nl - 2) return pos - half + 1;
+    return Nl - 1; /* pos == Nl-1 */
+}
+
+/* Inter-leaf T2 permutation: map node → position */
+static int ft_inter_pos_of(int node, int Nl) {
+    int half = Nl / 2;
+    if (node == 0) return 0;
+    if (node >= half && node <= Nl - 2) return node - half + 1;
+    if (node >= 1 && node <= half - 1) return half + node - 1;
+    return Nl - 1;
+}
+
 static int fattree_compute_trees(const char *topo_file, int root, int N,
                                  const char *adj, const uint16_t *flink,
                                  int max_fl, const int *bfs_order, int bfs_n,
                                  int depth0,
                                  int16_t *parent_arrays, int *out_tau)
 {
-    (void)topo_file; (void)adj; (void)flink; (void)max_fl;
+    (void)adj; (void)flink; (void)max_fl;
     (void)bfs_order; (void)bfs_n; (void)depth0;
-    (void)parent_arrays;
-    fprintf(stderr, "BBS: fattree_compute_trees() not yet implemented "
-            "(N=%d root=%d)\n", N, root);
-    *out_tau = 0;
-    return -1;
+
+    /* ---- Read npl from cfg ---- */
+    int npl = 0;
+    {
+        char dir[512] = {0};
+        strncpy(dir, topo_file, sizeof(dir) - 1);
+        char *sl = strrchr(dir, '/');
+        if (sl) *(sl + 1) = '\0';
+        else    strcpy(dir, "./");
+
+        int nc_from_name = 0;
+        const char *ft = strstr(topo_file, "fattree_");
+        if (ft) {
+            nc_from_name = atoi(ft + 8);
+        } else {
+            const char *tp = strstr(topo_file, "topo_");
+            if (tp) nc_from_name = atoi(tp + 5);
+        }
+        if (nc_from_name > 0) {
+            char cfg_path[512];
+            snprintf(cfg_path, sizeof(cfg_path),
+                     "%stopo_%d.cfg", dir, nc_from_name);
+            FILE *f = fopen(cfg_path, "r");
+            if (f) {
+                char line[64] = {0};
+                if (fgets(line, sizeof(line), f))
+                    if (strncmp(line, "fattree", 7) == 0)
+                        npl = atoi(line + 8);
+                fclose(f);
+            }
+        }
+        if (npl <= 0) {
+            fprintf(stderr, "FTREE: ERROR: cannot determine npl "
+                    "(N=%d root=%d)\n", N, root);
+            *out_tau = 0;
+            return -1;
+        }
+    }
+
+    /* ---- Derive topology: N = Nc + Nl + Ns ---- */
+    int Ns = npl;
+    int Nc = (N - Ns) * npl / (npl + 1);
+    int Nl = Nc / npl;
+
+    if (Nc + Nl + Ns != N || Nc <= 0 || Nl < 2) {
+        fprintf(stderr, "FTREE: ERROR: topology mismatch Nc=%d Nl=%d Ns=%d "
+                "!= N=%d\n", Nc, Nl, Ns, N);
+        *out_tau = 0;
+        return -1;
+    }
+
+    int leaf_base  = Nc;
+    int spine_base = Nc + Nl;
+
+    #define FT_LEAF(l)  (leaf_base  + (l))
+    #define FT_SPINE(s) (spine_base + (s))
+
+    int tau = 2;
+    if (tau > BBS_MAX_TREES) tau = BBS_MAX_TREES;
+
+    int root_leaf = root / npl;
+
+    fprintf(stderr, "FTREE: N=%d Nc=%d Nl=%d Ns=%d npl=%d root=%d "
+            "root_leaf=%d tau=%d\n", N, Nc, Nl, Ns, npl, root, root_leaf, tau);
+
+    /* ---- Build rank maps ----
+     * rank_map[leaf][abstract_pos] = actual compute rank
+     *
+     * Root's leaf: abstract pos 0 = root rank, pos 1..15 = remaining in order
+     * Other leaves: abstract pos i = base + i (identity)
+     */
+    int rank_map[128][16];  /* max 128 leaves */
+    for (int l = 0; l < Nl; l++) {
+        int base = l * npl;
+        if (l == root_leaf) {
+            rank_map[l][0] = root;
+            int slot = 1;
+            for (int i = 0; i < npl; i++) {
+                if (base + i == root) continue;
+                rank_map[l][slot++] = base + i;
+            }
+        } else {
+            for (int i = 0; i < npl; i++)
+                rank_map[l][i] = base + i;
+        }
+    }
+
+    /* ---- Build leaf_map: abstract inter-leaf index → actual leaf ----
+     * Abstract leaf 0 = root's actual leaf, remaining in natural order.
+     */
+    int leaf_map[128];
+    leaf_map[0] = root_leaf;
+    {
+        int slot = 1;
+        for (int l = 0; l < Nl; l++) {
+            if (l == root_leaf) continue;
+            leaf_map[slot++] = l;
+        }
+    }
+
+    /* ---- Build tau trees ---- */
+    for (int t = 0; t < tau; t++) {
+        int16_t *tree = parent_arrays + (size_t)t * N;
+        for (int i = 0; i < N; i++) tree[i] = -1;
+
+        const int8_t *intra = (t == 0) ? FT_INTRA_T1 : FT_INTRA_T2;
+
+        /* 1. Intra-leaf edges for all leaves */
+        for (int al = 0; al < Nl; al++) {
+            int actual_leaf = leaf_map[al];
+            for (int pos = 1; pos < npl; pos++) {
+                int par_pos = (int)intra[pos];
+                tree[rank_map[actual_leaf][pos]] =
+                    (int16_t)rank_map[actual_leaf][par_pos];
+            }
+        }
+
+        /* 2. Root's leaf switch: child of egress (pos 15) */
+        tree[FT_LEAF(root_leaf)] = (int16_t)rank_map[root_leaf][15];
+
+        /* 3. Inter-leaf edges: egress → [leaf_sw] → spine → child_leaf_sw → ingress */
+        for (int al = 1; al < Nl; al++) {
+            int actual_leaf = leaf_map[al];
+
+            /* Compute inter-leaf parent for abstract leaf al */
+            int parent_al;
+            if (t == 0) {
+                parent_al = al / 2;
+            } else {
+                int pos = ft_inter_pos_of(al, Nl);
+                int parent_pos = pos / 2;
+                parent_al = ft_inter_node_of(parent_pos, Nl);
+            }
+
+            int parent_leaf = leaf_map[parent_al];
+
+            /* Anti-correlated spine: one per parent node, offset by tree */
+            int spine_idx = (parent_al + t * (Ns / 2)) % Ns;
+
+            /* Spine parent: root's leaf switch, or egress of non-root parent */
+            if (parent_al == 0) {
+                tree[FT_SPINE(spine_idx)] = (int16_t)FT_LEAF(root_leaf);
+            } else {
+                tree[FT_SPINE(spine_idx)] =
+                    (int16_t)rank_map[parent_leaf][15];
+            }
+
+            /* Child leaf switch parent = spine */
+            tree[FT_LEAF(actual_leaf)] = (int16_t)FT_SPINE(spine_idx);
+
+            /* Ingress (pos 0) parent = child's leaf switch */
+            tree[rank_map[actual_leaf][0]] = (int16_t)FT_LEAF(actual_leaf);
+        }
+    }
+
+    /* 4. Attach unused switch ranks to childless compute nodes */
+    for (int t = 0; t < tau; t++) {
+        int16_t *tree = parent_arrays + (size_t)t * N;
+
+        /* Find childless compute nodes */
+        int *has_child = (int *)calloc(N, sizeof(int));
+        for (int i = 0; i < N; i++)
+            if (tree[i] >= 0) has_child[(int)tree[i]] = 1;
+
+        int childless[256], ncl = 0;
+        for (int i = 0; i < Nc; i++)
+            if (!has_child[i]) childless[ncl++] = i;
+
+        /* Find unused switch ranks (not root, no parent) */
+        int unused_r[256], nun = 0;
+        for (int i = Nc; i < N; i++)
+            if (tree[i] < 0 && i != root) unused_r[nun++] = i;
+
+        /* Attach each unused rank as a child of a childless compute node */
+        int ci = 0;
+        for (int u = 0; u < nun && ci < ncl; u++, ci++)
+            tree[unused_r[u]] = (int16_t)childless[ci];
+
+        free(has_child);
+    }
+
+    /* ---- Per-tree stats ---- */
+    for (int t = 0; t < tau; t++) {
+        int16_t *tree = parent_arrays + (size_t)t * N;
+        int d = tree_depth(tree, N);
+
+        int *fan = (int *)calloc(N, sizeof(int));
+        int max_fan = 0;
+        for (int i = 0; i < N; i++)
+            if (tree[i] >= 0) fan[(int)tree[i]]++;
+        for (int i = 0; i < N; i++)
+            if (fan[i] > max_fan) max_fan = fan[i];
+
+        int covered = 0;
+        for (int i = 0; i < N; i++)
+            if (tree[i] >= 0 || i == root) covered++;
+
+        fprintf(stderr, "FTREE: T%d: depth=%d max_fan=%d covered=%d/%d\n",
+                t, d, max_fan, covered, N);
+        if (covered != N)
+            fprintf(stderr, "FTREE: WARNING: T%d spans only %d/%d!\n",
+                    t, covered, N);
+
+        free(fan);
+    }
+
+    /* ---- Spine usage per tree ---- */
+    {
+        for (int t = 0; t < tau; t++) {
+            int16_t *tree = parent_arrays + (size_t)t * N;
+            int used = 0;
+            fprintf(stderr, "FTREE: T%d spines:", t);
+            for (int s = 0; s < Ns; s++) {
+                if (tree[FT_SPINE(s)] >= 0) {
+                    used++;
+                    /* count children of this spine */
+                    int ch = 0;
+                    for (int i = 0; i < N; i++)
+                        if (tree[i] == (int16_t)FT_SPINE(s)) ch++;
+                    fprintf(stderr, " s%d(%dch)", s, ch);
+                }
+            }
+            fprintf(stderr, " [%d/%d used]\n", used, Ns);
+        }
+    }
+
+    #undef FT_LEAF
+    #undef FT_SPINE
+
+    *out_tau = tau;
+    return 0;
 }
 
 /* ---- Write .bbs from parent arrays ---- */
@@ -1054,9 +1514,17 @@ static int bbs_write(const char *path, int N, int tau, int root,
     FILE *f = fopen(path, "wb");
     if (!f) return -1;
 
-    /* Header: magic(2) N(2) tau(1) pad(1) root(2) = 8 bytes */
+    /* Compute max depth across all trees (store in header for auto-chunking) */
+    int maxdepth = 0;
+    for (int t = 0; t < tau; t++) {
+        int d = tree_depth(parent_arrays + (size_t)t * N, N);
+        if (d > maxdepth) maxdepth = d;
+    }
+    if (maxdepth > 255) maxdepth = 255;
+
+    /* Header: magic(2) N(2) tau(1) depth(1) root(2) = 8 bytes */
     uint16_t h_magic = BBS_MAGIC, h_N = (uint16_t)N, h_root = (uint16_t)root;
-    uint8_t  h_tau = (uint8_t)tau, h_pad = 0;
+    uint8_t  h_tau = (uint8_t)tau, h_pad = (uint8_t)maxdepth;
     fwrite(&h_magic, 2, 1, f);
     fwrite(&h_N,     2, 1, f);
     fwrite(&h_tau,   1, 1, f);
@@ -1129,6 +1597,27 @@ static int tree_depth(const int16_t *par, int N)
 static int bbs_compute_trees(const char *topo_file, int root, int N,
                              int16_t *parent_arrays, int *out_tau)
 {
+    /* ---- Early FatTree detection ----
+     * FatTree uses pure compute-node ranks (no switch ranks).
+     * Detect from directory name and dispatch to the dedicated
+     * two-layer anti-correlated tree builder. */
+    {
+        const char *base = strrchr(topo_file, '/');
+        if (base) {
+            const char *dir_end = base;
+            const char *dir_start = topo_file;
+            for (const char *p = topo_file; p < dir_end; p++)
+                if (*p == '/') dir_start = p + 1;
+            int dlen = (int)(dir_end - dir_start);
+            if (dlen == 7 && memcmp(dir_start, "FatTree", 7) == 0) {
+                fprintf(stderr, "BBS: FatTree topology detected (N=%d)\n", N);
+                return fattree_compute_trees(topo_file, root, N,
+                                             NULL, NULL, 0, NULL, 0, 0,
+                                             parent_arrays, out_tau);
+            }
+        }
+    }
+
     topo_data_t td;
     if (topo_data_load(topo_file, &td) != 0) return -1;
 

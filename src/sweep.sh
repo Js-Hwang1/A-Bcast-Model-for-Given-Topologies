@@ -130,7 +130,7 @@ platform_path() {
 
 choose_chunks() {
     local msg=$1
-    local nc=$(( msg / 16384 )); (( nc < 4 )) && nc=4; echo "$nc"
+    local nc=$(( msg / 8192 )); (( nc < 4 )) && nc=4; echo "$nc"
 }
 
 topo_cfg_path() {
@@ -170,7 +170,11 @@ if [[ $needs_tdat -eq 1 ]]; then
             [[ ! -f "$_xml" ]] && continue
             if [[ ! -f "$_tdat" || "$_xml" -nt "$_tdat" ]]; then
                 echo "Preprocessing: $_xml -> $_tdat"
-                python3 "$PREPROCESS" "$_xml" "$_tdat"
+                if [[ -n "$SIF" ]]; then
+                    singularity exec --bind "$PROJ_ROOT" "$SIF" python3 "$PREPROCESS" "$_xml" "$_tdat"
+                else
+                    python3 "$PREPROCESS" "$_xml" "$_tdat"
+                fi
             fi
         done
     done
@@ -191,6 +195,23 @@ for TOPO in "${TOPOS[@]}"; do
         [[ ! -f "$PLATFORM" || ! -f "$HOSTFILE" ]] && continue
 
         for ALGO in "${ALGOS[@]}"; do
+            NP=$N
+            HF=$HOSTFILE
+            ROOT_ARG="all"
+            if [[ "$ALGO" == "bbs" && "$TOPO" == "FatTree" ]]; then
+                CFG_FILE="$TOPO_DIR/$TOPO/topo_${N}.cfg"
+                if [[ -f "$CFG_FILE" ]]; then
+                    NPL=$(awk '/^fattree/ { print $2 }' "$CFG_FILE")
+                    if [[ -n "$NPL" && "$NPL" -gt 0 ]]; then
+                        NL=$((N / NPL))
+                        NS=$NPL
+                        NP=$((N + NL + NS))  # Nc + Nl + Ns
+                        HF="$TOPO_DIR/$TOPO/hostfile_$NP"
+                        ROOT_ARG="all:$N"   # limit roots to compute nodes
+                    fi
+                fi
+            fi
+
             for MSG in "${MSG_SIZES[@]}"; do
                 NC=${CHUNKS_OVERRIDE:-$(choose_chunks "$MSG")}
 
@@ -201,14 +222,14 @@ for TOPO in "${TOPOS[@]}"; do
                     OUTDIR=$(dirname "$OUTJSON")
 
                     CMD="mkdir -p $OUTDIR"
-                    CMD+=" && $SMPI_PREFIX smpirun -np $N"
+                    CMD+=" && $SMPI_PREFIX smpirun -np $NP"
                     CMD+=" -platform $PLATFORM"
-                    CMD+=" -hostfile $HOSTFILE"
+                    CMD+=" -hostfile $HF"
                     CMD+=" --cfg=smpi/host-speed:$HOST_SPEED"
                     CMD+=" --cfg=smpi/simulate-computation:no"
                     CMD+=" --cfg=smpi/display-timing:yes"
                     CMD+=" --log=root.thres:warning"
-                    CMD+=" $BINARY $ALGO $MSG $NC all $OUTJSON"
+                    CMD+=" $BINARY $ALGO $MSG $NC $ROOT_ARG $OUTJSON"
                     if [[ "$ALGO" == "test" || "$ALGO" == "ffgb" || "$ALGO" == "obfs" || "$ALGO" == "bbs" ]]; then
                         CMD+=" $(topo_data_path "$TOPO" "$N")"
                     elif [[ "$ALGO" == "glf" ]]; then
@@ -225,9 +246,9 @@ for TOPO in "${TOPOS[@]}"; do
                         OUTDIR=$(dirname "$OUTJSON")
 
                         CMD="mkdir -p $OUTDIR"
-                        CMD+=" && $SMPI_PREFIX smpirun -np $N"
+                        CMD+=" && $SMPI_PREFIX smpirun -np $NP"
                         CMD+=" -platform $PLATFORM"
-                        CMD+=" -hostfile $HOSTFILE"
+                        CMD+=" -hostfile $HF"
                         CMD+=" --cfg=smpi/host-speed:$HOST_SPEED"
                         CMD+=" --cfg=smpi/simulate-computation:no"
                         CMD+=" --cfg=smpi/display-timing:yes"

@@ -1,0 +1,60 @@
+<?xml version='1.0'?>
+<!DOCTYPE platform SYSTEM "https://simgrid.org/simgrid.dtd">
+<platform version="4.1">
+  <zone id="world" routing="Floyd">
+    <!-- 16 compute nodes + 1 leaf switch -->
+    <host id="node-0"  speed="2000Gf"/>
+    <host id="node-1"  speed="2000Gf"/>
+    <host id="node-2"  speed="2000Gf"/>
+    <host id="node-3"  speed="2000Gf"/>
+    <host id="node-4"  speed="2000Gf"/>
+    <host id="node-5"  speed="2000Gf"/>
+    <host id="node-6"  speed="2000Gf"/>
+    <host id="node-7"  speed="2000Gf"/>
+    <host id="node-8"  speed="2000Gf"/>
+    <host id="node-9"  speed="2000Gf"/>
+    <host id="node-10" speed="2000Gf"/>
+    <host id="node-11" speed="2000Gf"/>
+    <host id="node-12" speed="2000Gf"/>
+    <host id="node-13" speed="2000Gf"/>
+    <host id="node-14" speed="2000Gf"/>
+    <host id="node-15" speed="2000Gf"/>
+    <host id="leaf-0"  speed="1Gf"/>
+
+    <!-- Each compute has a dedicated link to the leaf switch -->
+    <link id="link-n0"  bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-n1"  bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-n2"  bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-n3"  bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-n4"  bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-n5"  bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-n6"  bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-n7"  bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-n8"  bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-n9"  bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-n10" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-n11" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-n12" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-n13" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-n14" bandwidth="12.5GBps" latency="100ns"/>
+    <link id="link-n15" bandwidth="12.5GBps" latency="100ns"/>
+
+    <!-- Direct routes: each compute ↔ leaf -->
+    <route src="node-0"  dst="leaf-0"> <link_ctn id="link-n0"/>  </route>
+    <route src="node-1"  dst="leaf-0"> <link_ctn id="link-n1"/>  </route>
+    <route src="node-2"  dst="leaf-0"> <link_ctn id="link-n2"/>  </route>
+    <route src="node-3"  dst="leaf-0"> <link_ctn id="link-n3"/>  </route>
+    <route src="node-4"  dst="leaf-0"> <link_ctn id="link-n4"/>  </route>
+    <route src="node-5"  dst="leaf-0"> <link_ctn id="link-n5"/>  </route>
+    <route src="node-6"  dst="leaf-0"> <link_ctn id="link-n6"/>  </route>
+    <route src="node-7"  dst="leaf-0"> <link_ctn id="link-n7"/>  </route>
+    <route src="node-8"  dst="leaf-0"> <link_ctn id="link-n8"/>  </route>
+    <route src="node-9"  dst="leaf-0"> <link_ctn id="link-n9"/>  </route>
+    <route src="node-10" dst="leaf-0"> <link_ctn id="link-n10"/> </route>
+    <route src="node-11" dst="leaf-0"> <link_ctn id="link-n11"/> </route>
+    <route src="node-12" dst="leaf-0"> <link_ctn id="link-n12"/> </route>
+    <route src="node-13" dst="leaf-0"> <link_ctn id="link-n13"/> </route>
+    <route src="node-14" dst="leaf-0"> <link_ctn id="link-n14"/> </route>
+    <route src="node-15" dst="leaf-0"> <link_ctn id="link-n15"/> </route>
+  </zone>
+</platform>

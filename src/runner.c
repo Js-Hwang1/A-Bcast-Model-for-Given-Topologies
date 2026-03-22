@@ -61,6 +61,20 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+/* SMPI_SHARED_MALLOC: all N simulated processes share ONE physical
+ * allocation, so memory is O(msg) not O(N*msg).
+ * smpicc's mpi.h already defines this; fall back to malloc otherwise. */
+#ifndef SMPI_SHARED_MALLOC
+#  define SMPI_SHARED_MALLOC(sz)  malloc(sz)
+#  define SMPI_SHARED_FREE(p)     free(p)
+#endif
+
+/* Single shared simulation buffer — allocated once, reused by all N
+ * SimGrid coroutines (they share one OS address space).
+ * Physical: O(msg), not O(N*msg).  No folded VMAs, no OOM. */
+static char  *_sim_buf       = NULL;
+static size_t _sim_buf_bytes = 0;
+
 /* ================================================================
  * Algorithm 1: Native MPI_Bcast
  * ================================================================ */
@@ -2705,12 +2719,16 @@ int main(int argc, char **argv)
     if (topo_file && strcmp(topo_file, "_") == 0) topo_file = NULL;
 
     int all_roots  = 0;
+    int max_compute_rank = 0;   /* 0 = use size; >0 = limit all-roots to 0..max-1 */
     int sweep_mode = 0;
     const char *sweep_outdir = NULL;
     int root = 0;
     if (argc > 4) {
         if (strcmp(argv[4], "all") == 0) {
             all_roots = 1;
+        } else if (strncmp(argv[4], "all:", 4) == 0) {
+            all_roots = 1;
+            max_compute_rank = atoi(argv[4] + 4);
         } else if (strcmp(argv[4], "sweep") == 0) {
             sweep_mode = 1;
             sweep_outdir = (argc > 5) ? argv[5] : NULL;
@@ -2845,16 +2863,22 @@ int main(int argc, char **argv)
         }
 
         /* 3. Run missing roots */
-        char *buf = calloc(nbytes, 1);
+        if ((size_t)nbytes > _sim_buf_bytes) {
+            free(_sim_buf);
+            _sim_buf = malloc(nbytes);
+            _sim_buf_bytes = (size_t)nbytes;
+        }
+        char *buf = _sim_buf;
 
         for (int r = 0; r < size; r++) {
             if (root_done[r]) continue;
 
-            /* Reset buffer; root fills with known pattern */
-            memset(buf, 0, nbytes);
-            if (rank == r)
+            /* Only root fills buffer; all coroutines share the same allocation */
+            if (rank == r) {
+                memset(buf, 0, nbytes);
                 for (int i = 0; i < nbytes; i++)
                     buf[i] = (char)(i & 0xFF);
+            }
 
             MPI_Barrier(MPI_COMM_WORLD);
 
@@ -2913,8 +2937,6 @@ int main(int argc, char **argv)
 
             MPI_Barrier(MPI_COMM_WORLD);
         }
-
-        free(buf);
 
         /* 4. Aggregate all per-root JSONs → bulk JSON */
         if (rank == 0) {
@@ -2999,19 +3021,25 @@ int main(int argc, char **argv)
 
     /* ---- Root loop (single root / all-roots mode) ---- */
     int root_lo = all_roots ? 0 : root;
-    int root_hi = all_roots ? size - 1 : root;
+    int root_hi = all_roots ? ((max_compute_rank > 0 ? max_compute_rank : size) - 1) : root;
     int nroots  = root_hi - root_lo + 1;
 
     double *times = calloc(nroots, sizeof(double));
     int    *oks   = calloc(nroots, sizeof(int));
-    char   *buf   = calloc(nbytes, 1);
+    if ((size_t)nbytes > _sim_buf_bytes) {
+        free(_sim_buf);
+        _sim_buf = malloc(nbytes);
+        _sim_buf_bytes = (size_t)nbytes;
+    }
+    char *buf = _sim_buf;
 
     for (int r = root_lo; r <= root_hi; r++) {
-        /* Reset buffer; root fills with known pattern */
-        memset(buf, 0, nbytes);
-        if (rank == r)
+        /* Only root fills buffer; all coroutines share the same allocation */
+        if (rank == r) {
+            memset(buf, 0, nbytes);
             for (int i = 0; i < nbytes; i++)
                 buf[i] = (char)(i & 0xFF);
+        }
 
         /* ---- Dispatch ---- */
         double elapsed = 0.0;
@@ -3065,9 +3093,9 @@ int main(int argc, char **argv)
             double stdev = sqrt(sum2 / nroots - mean * mean);
 
             printf("algorithm : %s\n", algo);
-            printf("nodes     : %d\n", size);
+            printf("nodes     : %d\n", max_compute_rank > 0 ? max_compute_rank : size);
             printf("msg_bytes : %d\n", nbytes);
-            printf("roots     : all (0..%d)\n", size - 1);
+            printf("roots     : all (0..%d)\n", root_hi);
             printf("mean_sec  : %.6e +/- %.2e\n", mean, stdev);
             printf("min_sec   : %.9f\n", mn);
             printf("max_sec   : %.9f\n", mx);
@@ -3090,7 +3118,8 @@ int main(int argc, char **argv)
                         "  \"max_sec\": %.9e,\n"
                         "  \"correct\": %s,\n"
                         "  \"per_root_sec\": [",
-                        algo, size, nbytes, reported_nchunks,
+                        algo, max_compute_rank > 0 ? max_compute_rank : size,
+                        nbytes, reported_nchunks,
                         nroots, mean, stdev, mn, mx,
                         correct ? "true" : "false");
                     for (int i = 0; i < nroots; i++)
@@ -3139,7 +3168,7 @@ int main(int argc, char **argv)
         }
     }
 
-    free(times); free(oks); free(buf);
+    free(times); free(oks);
     MPI_Finalize();
     return 0;
 }

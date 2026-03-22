@@ -59,6 +59,7 @@
 /* ---- Per-node routing table (lives on stack, fits in L1) ---- */
 typedef struct {
     uint8_t  tau;
+    uint8_t  depth;   /* max tree depth (from .bbs header, for auto-chunking) */
     int16_t  parent[BBS_MAX_TREES];
     uint8_t  nchildren[BBS_MAX_TREES];
     int16_t  children[BBS_MAX_TREES][BBS_MAX_FANOUT];
@@ -82,7 +83,8 @@ static int bbs_load_route(const char *path, int me, bbs_route_t *rt)
         fclose(f); return -1;
     }
 
-    rt->tau = tau;
+    rt->tau   = tau;
+    rt->depth = pad;  /* max tree depth stored in header */
 
     /* Jump to this node's offset entry, read it, jump to data */
     uint32_t off;
@@ -118,18 +120,17 @@ static int bbs_load_route(const char *path, int me, bbs_route_t *rt)
 static double run_bbs(void *buf, int count, int rank, int size,
                       int root, const char *topo_file, int nchunks)
 {
-    /* ---- Construct .bbs path in encodings/<topo>/N=<size>/ ---- */
+    /* ---- Construct .bbs path in <project_root>/encodings/<topo>/N=<size>/ ----
+     * Derive project root from topo_file which is always:
+     *   <project_root>/topo/<TOPO>/platform_*.tdat               */
     char bbs_path[512];
     {
-        /* Extract topology name from topo_file path.
-         * Expected: "topo/<TOPO>/platform_*.tdat" or similar.
-         * We find the directory component just before the filename. */
+        /* Extract topology name = parent directory of topo_file */
         const char *base = strrchr(topo_file, '/');
         const char *topo_name = "unknown";
         char topo_buf[64] = {0};
         if (base) {
-            /* Walk back to find the parent directory name */
-            const char *dir_end = base;        /* points to last '/' */
+            const char *dir_end = base;
             const char *dir_start = topo_file;
             for (const char *p = topo_file; p < dir_end; p++)
                 if (*p == '/') dir_start = p + 1;
@@ -140,54 +141,107 @@ static double run_bbs(void *buf, int count, int rank, int size,
                 topo_name = topo_buf;
             }
         }
+
+        /* Find project root: go up from topo/<TOPO>/file to get root.
+         * topo_file = "<root>/topo/<TOPO>/<file>" → we need <root>. */
+        char proj_root[512] = ".";
+        if (base) {
+            /* Find the "topo/" component by searching backwards */
+            const char *p = base;
+            int slashes = 0;
+            while (p > topo_file && slashes < 2) {
+                p--;
+                if (*p == '/') slashes++;
+            }
+            if (slashes == 2) {
+                int rlen = (int)(p - topo_file);
+                if (rlen > 0 && rlen < (int)sizeof(proj_root)) {
+                    memcpy(proj_root, topo_file, rlen);
+                    proj_root[rlen] = '\0';
+                }
+            }
+        }
+
         /* Ensure directory exists (rank 0 only, harmless if exists) */
         if (rank == 0) {
             char dir[512];
-            snprintf(dir, sizeof(dir), "encodings/%s", topo_name);
+            snprintf(dir, sizeof(dir), "%s/encodings", proj_root);
             mkdir(dir, 0755);
-            snprintf(dir, sizeof(dir), "encodings/%s/N=%d", topo_name, size);
+            snprintf(dir, sizeof(dir), "%s/encodings/%s", proj_root, topo_name);
+            mkdir(dir, 0755);
+            snprintf(dir, sizeof(dir), "%s/encodings/%s/N=%d", proj_root, topo_name, size);
             mkdir(dir, 0755);
         }
         MPI_Barrier(MPI_COMM_WORLD);
+
+        /* Dragonfly uses two tree variants:
+         * "s" suffix = shallow (depth≈9, good for small msgs)
+         * no suffix  = deep    (depth≈53, good for large msgs)
+         * Threshold: 256KB.
+         * Shallow tree only supports N=128 (hardcoded offsets). */
+        int is_dfly = (strcmp(topo_name, "Dragonfly") == 0);
+        int use_shallow = is_dfly && (count < 262144) && (size == 128);
         snprintf(bbs_path, sizeof(bbs_path),
-                 "encodings/%s/N=%d/R%d.bbs", topo_name, size, root);
+                 "%s/encodings/%s/N=%d/R%d%s.bbs", proj_root, topo_name, size,
+                 root, use_shallow ? "s" : "");
     }
 
-    /* ---- Load routing ---- */
+    /* ---- Encode if .bbs missing (rank 0 probes and generates) ---- */
+    {
+        int need_gen = 0;
+        if (rank == 0) {
+            FILE *probe = fopen(bbs_path, "rb");
+            if (probe) { fclose(probe); } else { need_gen = 1; }
+        }
+        MPI_Bcast(&need_gen, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        if (need_gen) {
+            if (rank == 0) {
+                int16_t *trees = (int16_t *)malloc(BBS_MAX_TREES * size * sizeof(int16_t));
+                int tau = 1;
+                dfly_use_shallow = (strstr(bbs_path, "s.bbs") != NULL &&
+                                    strstr(bbs_path, "Dragonfly") != NULL);
+                bbs_compute_trees(topo_file, root, size, trees, &tau);
+                dfly_use_shallow = 0;
+                bbs_write(bbs_path, size, tau, root, trees);
+                fprintf(stderr, "BBS: generated %s (tau=%d)\n", bbs_path, tau);
+                free(trees);
+            }
+            MPI_Barrier(MPI_COMM_WORLD);
+        }
+    }
+
+    /* ---- Load routing strictly from .bbs file ---- */
     bbs_route_t rt;
     if (bbs_load_route(bbs_path, rank, &rt) != 0) {
-        /* .bbs missing — rank 0 generates it, all ranks build
-         * route from a shared parent array (no file I/O after).
-         * The generation uses only rank-0 compute + one MPI_Bcast
-         * to distribute.  The timing barrier afterwards ensures
-         * none of this leaks into the broadcast measurement. */
-        int16_t *trees = NULL;
-        int tau = 1;
-        if (rank == 0) {
-            trees = (int16_t *)malloc(BBS_MAX_TREES * size * sizeof(int16_t));
-            bbs_compute_trees(topo_file, root, size, trees, &tau);
-            bbs_write(bbs_path, size, tau, root, trees);
-            fprintf(stderr, "BBS: generated %s (tau=%d)\n", bbs_path, tau);
-        }
-        /* Distribute tree structure */
-        MPI_Bcast(&tau, 1, MPI_INT, 0, MPI_COMM_WORLD);
-        if (!trees) trees = (int16_t *)malloc(tau * size * sizeof(int16_t));
-        MPI_Bcast(trees, tau * size, MPI_SHORT, 0, MPI_COMM_WORLD);
-        /* Build route struct directly from tree arrays */
-        rt.tau = (uint8_t)tau;
-        for (int t = 0; t < tau; t++) {
-            rt.parent[t] = trees[t * size + rank];
-            rt.nchildren[t] = 0;
-            for (int i = 0; i < size; i++)
-                if (trees[t * size + i] == (int16_t)rank)
-                    rt.children[t][rt.nchildren[t]++] = (int16_t)i;
-        }
-        free(trees);
+        fprintf(stderr, "BBS: FATAL: cannot load %s for rank %d\n", bbs_path, rank);
+        MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
-    /* ---- Setup ---- */ 
+    /* ---- Setup ---- */
     int tau = rt.tau;
-    int k   = nchunks > 0 ? nchunks : 1;
+    int k;
+    if (nchunks > 0) {
+        k = nchunks;
+    } else {
+        /* Auto-chunk: k = sqrt(a * n / (b * L * B))
+         * a = tree depth, n = msg bytes, b = union_degree/tau,
+         * L = effective per-hop latency, B = effective per-hop bandwidth.
+         * For dragonfly (tau=2, union_degree=4): b=2, L≈0.4µs, B≈3.75 GBps.
+         * Calibrated from measurements: L*B ≈ 1500 bytes. */
+        int a = rt.depth > 0 ? rt.depth : 1;
+        double b = 2.0;           /* union_degree / tau = 4/2 */
+        double LB = 1500.0;       /* L * B in bytes (0.4µs × 3.75 GBps) */
+        double kf = sqrt((double)a * count / (b * LB));
+        k = (int)(kf + 0.5);
+        if (k < 1) k = 1;
+        if (k > count) k = count;
+        /* Round to nearest power of 2 for clean chunk sizes */
+        int kp = 1;
+        while (kp * 2 <= k) kp *= 2;
+        if (k - kp > kp * 2 - k) kp *= 2;
+        k = kp;
+        if (k > count) k = count;
+    }
     int base_chunk = count / k;
     int leftover   = count % k;
     int is_root    = (rank == root);
@@ -243,9 +297,13 @@ static double run_bbs(void *buf, int count, int rank, int size,
     } else {
         /* Non-root: windowed Irecv — post tau receives initially,
          * then replace each completed one with the next chunk's receive.
-         * Waitany returns chunks in arrival order (any tree first). */
-        int window = tau < k ? tau : k;
-        int next_post = window;  /* next chunk tag to post */
+         * Waitany returns chunks in arrival order (any tree first).
+         *
+         * IMPORTANT: use per-tree next-chunk counters so that when
+         * tree t's chunk completes, the next posted receive is also
+         * for tree t.  A global sequential counter can create window
+         * imbalance (2 active receives on one tree, 0 on the other),
+         * which allows concurrent flows on the same physical link. */
         int completed = 0;
         int total_recv = 0;
 
@@ -259,8 +317,13 @@ static double run_bbs(void *buf, int count, int rank, int size,
         for (int c = 0; c < k; c++)
             rrecv[c] = MPI_REQUEST_NULL;
 
-        /* Post initial window */
-        for (int c = 0; c < window; c++) {
+        /* Per-tree next-chunk counters (start after initial window) */
+        int next_tree[BBS_MAX_TREES];
+        for (int t = 0; t < tau; t++)
+            next_tree[t] = tau + t;   /* tree 0 → 2, tree 1 → 3, etc. */
+
+        /* Post initial window: one receive per tree */
+        for (int c = 0; c < tau && c < k; c++) {
             int t = c % tau;
             if (rt.parent[t] >= 0) {
                 MPI_Irecv((char *)buf + coff[c], csz[c], MPI_BYTE,
@@ -282,18 +345,12 @@ static double run_bbs(void *buf, int count, int rank, int size,
                           rt.children[t][j], idx, MPI_COMM_WORLD,
                           &rsend[si++]);
 
-            /* Post next receive to keep window full */
-            while (next_post < k) {
-                int nt = next_post % tau;
-                if (rt.parent[nt] >= 0) {
-                    MPI_Irecv((char *)buf + coff[next_post],
-                              csz[next_post], MPI_BYTE,
-                              MPI_ANY_SOURCE, next_post,
-                              MPI_COMM_WORLD, &rrecv[next_post]);
-                    next_post++;
-                    break;
-                }
-                next_post++;
+            /* Post next receive for the SAME TREE that just completed */
+            if (next_tree[t] < k && rt.parent[t] >= 0) {
+                int nc = next_tree[t];
+                MPI_Irecv((char *)buf + coff[nc], csz[nc], MPI_BYTE,
+                          MPI_ANY_SOURCE, nc, MPI_COMM_WORLD, &rrecv[nc]);
+                next_tree[t] += tau;
             }
         }
     }
