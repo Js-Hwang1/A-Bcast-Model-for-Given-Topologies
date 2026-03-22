@@ -204,10 +204,10 @@ for TOPO in "${TOPOS[@]}"; do
                     NPL=$(awk '/^fattree/ { print $2 }' "$CFG_FILE")
                     if [[ -n "$NPL" && "$NPL" -gt 0 ]]; then
                         NL=$((N / NPL))
-                        NS=$NPL
-                        NP=$((N + NL + NS))  # Nc + Nl + Ns
-                        HF="$TOPO_DIR/$TOPO/hostfile_$NP"
-                        ROOT_ARG="all:$N"   # limit roots to compute nodes
+                        NS=$((2 * (NL - 1)))  # one spine rank per inter-leaf edge
+                        NP=$((N + NL + NS))    # Nc + Nl + 2*(Nl-1)
+                        HF="$TOPO_DIR/$TOPO/hostfile_bbs_$N"
+                        ROOT_ARG="all:$N"      # limit roots to compute nodes
                     fi
                 fi
             fi

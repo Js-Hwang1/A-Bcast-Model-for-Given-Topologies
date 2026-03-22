@@ -1187,22 +1187,31 @@ static int dragonfly_compute_trees(const char *topo_file, int root, int N,
 static const int8_t FT_INTRA_T1[16] = {-1, 0, 1, 1, 5, 2, 2, 6, 5, 3, 3, 6, 9, 9, 10, 10};
 static const int8_t FT_INTRA_T2[16] = {-1, 7, 7, 11, 0, 11, 13, 8, 4, 14, 13, 8, 4, 12, 12, 14};
 
-/* Inter-leaf T2 permutation: map position → node */
+/* Inter-leaf T2 permutation sigma: position → node.
+ * Non-involutory swap of A={1..h} and B={h+1..2h} where h=Nl/2-1.
+ * Nodes 0 and Nl-1 fixed.  Produces edge-disjoint trees with
+ * union degree [2,4,...,4,2].  Requires Nl >= 8. */
 static int ft_inter_node_of(int pos, int Nl) {
-    int half = Nl / 2;
-    if (pos == 0) return 0;
-    if (pos >= 1 && pos <= half - 1) return half + pos - 1;
-    if (pos >= half && pos <= Nl - 2) return pos - half + 1;
-    return Nl - 1; /* pos == Nl-1 */
+    int h = Nl / 2 - 1;
+    if (pos == 0 || pos == Nl - 1) return pos;
+    if (pos <= h - 2)  return h + pos;   /* A bulk → B */
+    if (pos == h - 1)  return 2 * h;     /* A second-last → B last */
+    if (pos == h)      return 2 * h - 1; /* A last → B second-last */
+    if (pos == h + 1)  return 2;         /* B first → A second */
+    if (pos == h + 2)  return 1;         /* B second → A first */
+    return pos - h;                      /* B bulk → A */
 }
 
-/* Inter-leaf T2 permutation: map node → position */
+/* Inter-leaf T2 permutation inverse: node → position. */
 static int ft_inter_pos_of(int node, int Nl) {
-    int half = Nl / 2;
-    if (node == 0) return 0;
-    if (node >= half && node <= Nl - 2) return node - half + 1;
-    if (node >= 1 && node <= half - 1) return half + node - 1;
-    return Nl - 1;
+    int h = Nl / 2 - 1;
+    if (node == 0 || node == Nl - 1) return node;
+    if (node == 1)      return h + 2;
+    if (node == 2)      return h + 1;
+    if (node >= 3 && node <= h) return node + h;  /* A → B positions */
+    if (node <= 2*h - 2) return node - h;         /* B bulk → A */
+    if (node == 2*h - 1) return h;
+    return h - 1;                                 /* node == 2*h */
 }
 
 static int fattree_compute_trees(const char *topo_file, int root, int N,
@@ -1252,14 +1261,18 @@ static int fattree_compute_trees(const char *topo_file, int root, int N,
         }
     }
 
-    /* ---- Derive topology: N = Nc + Nl + Ns ---- */
-    int Ns = npl;
-    int Nc = (N - Ns) * npl / (npl + 1);
-    int Nl = Nc / npl;
+    /* ---- Derive topology: N = Nc + Nl + Ns, Ns = 2*(Nl-1) ----
+     * N = Nl*npl + Nl + 2*(Nl-1) = Nl*(npl+3) - 2
+     * => Nl = (N+2) / (npl+3)
+     */
+    int Nl = (N + 2) / (npl + 3);
+    int Nc = Nl * npl;
+    int Ns = 2 * (Nl - 1);   /* one spine rank per inter-leaf edge */
 
     if (Nc + Nl + Ns != N || Nc <= 0 || Nl < 2) {
         fprintf(stderr, "FTREE: ERROR: topology mismatch Nc=%d Nl=%d Ns=%d "
-                "!= N=%d\n", Nc, Nl, Ns, N);
+                "!= N=%d  (expected N = Nl*(npl+3)-2 = %d)\n",
+                Nc, Nl, Ns, N, Nl * (npl + 3) - 2);
         *out_tau = 0;
         return -1;
     }
@@ -1333,7 +1346,10 @@ static int fattree_compute_trees(const char *topo_file, int root, int N,
         /* 2. Root's leaf switch: child of egress (pos 15) */
         tree[FT_LEAF(root_leaf)] = (int16_t)rank_map[root_leaf][15];
 
-        /* 3. Inter-leaf edges: egress → [leaf_sw] → spine → child_leaf_sw → ingress */
+        /* 3. Inter-leaf edges: egress → spine_rank → child_leaf_sw → ingress
+         *    Each edge gets a unique spine rank:
+         *    spine_rank = spine_base + t*(Nl-1) + (al-1)
+         */
         for (int al = 1; al < Nl; al++) {
             int actual_leaf = leaf_map[al];
 
@@ -1348,20 +1364,18 @@ static int fattree_compute_trees(const char *topo_file, int root, int N,
             }
 
             int parent_leaf = leaf_map[parent_al];
-
-            /* Anti-correlated spine: one per parent node, offset by tree */
-            int spine_idx = (parent_al + t * (Ns / 2)) % Ns;
+            int spine_rank = spine_base + t * (Nl - 1) + (al - 1);
 
             /* Spine parent: root's leaf switch, or egress of non-root parent */
             if (parent_al == 0) {
-                tree[FT_SPINE(spine_idx)] = (int16_t)FT_LEAF(root_leaf);
+                tree[spine_rank] = (int16_t)FT_LEAF(root_leaf);
             } else {
-                tree[FT_SPINE(spine_idx)] =
+                tree[spine_rank] =
                     (int16_t)rank_map[parent_leaf][15];
             }
 
             /* Child leaf switch parent = spine */
-            tree[FT_LEAF(actual_leaf)] = (int16_t)FT_SPINE(spine_idx);
+            tree[FT_LEAF(actual_leaf)] = (int16_t)spine_rank;
 
             /* Ingress (pos 0) parent = child's leaf switch */
             tree[rank_map[actual_leaf][0]] = (int16_t)FT_LEAF(actual_leaf);
@@ -1377,12 +1391,14 @@ static int fattree_compute_trees(const char *topo_file, int root, int N,
         for (int i = 0; i < N; i++)
             if (tree[i] >= 0) has_child[(int)tree[i]] = 1;
 
-        int childless[256], ncl = 0;
+        int *childless = (int *)malloc(Nc * sizeof(int));
+        int ncl = 0;
         for (int i = 0; i < Nc; i++)
             if (!has_child[i]) childless[ncl++] = i;
 
         /* Find unused switch ranks (not root, no parent) */
-        int unused_r[256], nun = 0;
+        int *unused_r = (int *)malloc((Nl + Ns) * sizeof(int));
+        int nun = 0;
         for (int i = Nc; i < N; i++)
             if (tree[i] < 0 && i != root) unused_r[nun++] = i;
 
@@ -1391,6 +1407,8 @@ static int fattree_compute_trees(const char *topo_file, int root, int N,
         for (int u = 0; u < nun && ci < ncl; u++, ci++)
             tree[unused_r[u]] = (int16_t)childless[ci];
 
+        free(childless);
+        free(unused_r);
         free(has_child);
     }
 
@@ -1424,18 +1442,20 @@ static int fattree_compute_trees(const char *topo_file, int root, int N,
         for (int t = 0; t < tau; t++) {
             int16_t *tree = parent_arrays + (size_t)t * N;
             int used = 0;
+            int base = spine_base + t * (Nl - 1);
+            int count = Nl - 1;
             fprintf(stderr, "FTREE: T%d spines:", t);
-            for (int s = 0; s < Ns; s++) {
-                if (tree[FT_SPINE(s)] >= 0) {
+            for (int s = 0; s < count; s++) {
+                int sr = base + s;
+                if (tree[sr] >= 0) {
                     used++;
-                    /* count children of this spine */
                     int ch = 0;
                     for (int i = 0; i < N; i++)
-                        if (tree[i] == (int16_t)FT_SPINE(s)) ch++;
-                    fprintf(stderr, " s%d(%dch)", s, ch);
+                        if (tree[i] == (int16_t)sr) ch++;
+                    fprintf(stderr, " r%d(%dch)", sr, ch);
                 }
             }
-            fprintf(stderr, " [%d/%d used]\n", used, Ns);
+            fprintf(stderr, " [%d/%d used]\n", used, count);
         }
     }
 
