@@ -256,13 +256,29 @@ for TOPO in "${TOPOS[@]}"; do
                     echo "$CMD" >> "$JOBFILE"
                     NJOBS=$((NJOBS + 1))
                 else
-                    # Per-root mode: one smpirun per root value
-                    ROOTS=$(root_range "$N")
-                    for ROOT in $ROOTS; do
-                        OUTJSON="$DATA_DIR/$TOPO/$ALGO/N${N}_MSG${MSG}_R${ROOT}.json"
-                        [[ -f "$OUTJSON" ]] && continue
-                        OUTDIR=$(dirname "$OUTJSON")
+                    # Per-root mode: batch roots into JOBS batches
+                    ROOTS_ARR=($(root_range "$N"))
+                    TOTAL_ROOTS=${#ROOTS_ARR[@]}
+                    BATCH_SZ=$(( (TOTAL_ROOTS + JOBS - 1) / JOBS ))
+                    (( BATCH_SZ < 1 )) && BATCH_SZ=1
 
+                    for ((bi=0; bi<TOTAL_ROOTS; bi+=BATCH_SZ)); do
+                        BLO=${ROOTS_ARR[$bi]}
+                        BHI_IDX=$((bi + BATCH_SZ - 1))
+                        (( BHI_IDX >= TOTAL_ROOTS )) && BHI_IDX=$((TOTAL_ROOTS - 1))
+                        BHI=${ROOTS_ARR[$BHI_IDX]}
+
+                        OUTBASE="$DATA_DIR/$TOPO/$ALGO/N${N}_MSG${MSG}"
+
+                        # Skip if all per-root JSONs in this batch already exist
+                        ALL_EXIST=1
+                        for ((ri=bi; ri<=BHI_IDX; ri++)); do
+                            RR=${ROOTS_ARR[$ri]}
+                            [[ ! -f "${OUTBASE}_R${RR}.json" ]] && ALL_EXIST=0 && break
+                        done
+                        (( ALL_EXIST == 1 )) && continue
+
+                        OUTDIR=$(dirname "$OUTBASE")
                         CMD="mkdir -p $OUTDIR"
                         CMD+=" && $SMPI_PREFIX smpirun -np $NP"
                         CMD+=" -platform $PLATFORM"
@@ -273,14 +289,14 @@ for TOPO in "${TOPOS[@]}"; do
                         CMD+=" --log=root.thres:warning"
 
                         if [[ "${TRACE:-}" == "1" ]]; then
-                            TRACEFILE="${OUTJSON%.json}.trace"
+                            TRACEFILE="${OUTBASE}_batch${BLO}-${BHI}.trace"
                             CMD+=" -trace"
                             CMD+=" --cfg=tracing/filename:$TRACEFILE"
                             CMD+=" --cfg=tracing/smpi:yes"
                             CMD+=" --cfg=tracing/smpi/internals:yes"
                         fi
 
-                        CMD+=" $BINARY $ALGO $MSG $NC ${ROOT}${ROOT_SUFFIX} $OUTJSON"
+                        CMD+=" $BINARY $ALGO $MSG $NC ${BLO}-${BHI}${ROOT_SUFFIX} $OUTBASE"
                         if [[ "$ALGO" == "test" || "$ALGO" == "ffgb" || "$ALGO" == "obfs" || "$ALGO" == "bbs" ]]; then
                             CMD+=" $(topo_data_path "$TOPO" "$N")"
                         elif [[ "$ALGO" == "glf" ]]; then

@@ -2723,6 +2723,7 @@ int main(int argc, char **argv)
     int sweep_mode = 0;
     const char *sweep_outdir = NULL;
     int root = 0;
+    int batch_mode = 0, root_lo_batch = 0, root_hi_batch = 0;
     if (argc > 4) {
         if (strcmp(argv[4], "all") == 0) {
             all_roots = 1;
@@ -2741,9 +2742,18 @@ int main(int argc, char **argv)
                 return 1;
             }
         } else {
-            root = atoi(argv[4]);
-            const char *colon = strchr(argv[4], ':');
-            if (colon) max_compute_rank = atoi(colon + 1);
+            char *dash = strchr(argv[4], '-');
+            if (dash && dash != argv[4]) {
+                batch_mode = 1;
+                root_lo_batch = atoi(argv[4]);
+                root_hi_batch = atoi(dash + 1);
+                const char *colon = strchr(dash, ':');
+                if (colon) max_compute_rank = atoi(colon + 1);
+            } else {
+                root = atoi(argv[4]);
+                const char *colon = strchr(argv[4], ':');
+                if (colon) max_compute_rank = atoi(colon + 1);
+            }
         }
     }
 
@@ -2752,7 +2762,7 @@ int main(int argc, char **argv)
         MPI_Finalize();
         return 1;
     }
-    if (!all_roots && !sweep_mode && (root < 0 || root >= size)) {
+    if (!all_roots && !sweep_mode && !batch_mode && (root < 0 || root >= size)) {
         if (rank == 0)
             fprintf(stderr, "root must be in 0..%d or 'all'/'sweep' (got %d)\n",
                     size - 1, root);
@@ -3021,10 +3031,38 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    /* ---- Root loop (single root / all-roots mode) ---- */
-    int root_lo = all_roots ? 0 : root;
-    int root_hi = all_roots ? ((max_compute_rank > 0 ? max_compute_rank : size) - 1) : root;
+    /* ---- Root loop (single root / batch / all-roots mode) ---- */
+    int root_lo, root_hi;
+    if (all_roots) {
+        root_lo = 0;
+        root_hi = (max_compute_rank > 0 ? max_compute_rank : size) - 1;
+    } else if (batch_mode) {
+        root_lo = root_lo_batch;
+        root_hi = root_hi_batch;
+    } else {
+        root_lo = root;
+        root_hi = root;
+    }
     int nroots  = root_hi - root_lo + 1;
+
+    /* In batch mode, check which per-root JSONs already exist and skip them */
+    int *root_done = NULL;
+    if (batch_mode && out_json) {
+        root_done = calloc(nroots, sizeof(int));
+        int n_cached = 0;
+        if (rank == 0) {
+            for (int i = 0; i < nroots; i++) {
+                char rp[4096];
+                snprintf(rp, sizeof(rp), "%s_R%d.json", out_json, root_lo + i);
+                root_done[i] = file_exists(rp);
+                n_cached += root_done[i];
+            }
+            if (n_cached > 0)
+                printf("batch %d..%d: %d/%d roots cached, running %d\n",
+                       root_lo, root_hi, n_cached, nroots, nroots - n_cached);
+        }
+        MPI_Bcast(root_done, nroots, MPI_INT, 0, MPI_COMM_WORLD);
+    }
 
     double *times = calloc(nroots, sizeof(double));
     int    *oks   = calloc(nroots, sizeof(int));
@@ -3036,6 +3074,8 @@ int main(int argc, char **argv)
     char *buf = _sim_buf;
 
     for (int r = root_lo; r <= root_hi; r++) {
+        /* Skip roots whose JSON already exists (batch mode) */
+        if (root_done && root_done[r - root_lo]) continue;
         /* Only root fills buffer; all coroutines share the same allocation */
         if (rank == r) {
             memset(buf, 0, nbytes);
@@ -3135,6 +3175,47 @@ int main(int argc, char **argv)
                         out_json);
                 }
             }
+        } else if (batch_mode) {
+            /* ---- Batch mode: write per-root JSON files ---- */
+            int nodes_val = max_compute_rank > 0 ? max_compute_rank : size;
+            printf("algorithm : %s\n", algo);
+            printf("nodes     : %d\n", nodes_val);
+            printf("msg_bytes : %d\n", nbytes);
+            printf("roots     : batch %d..%d\n", root_lo, root_hi);
+            for (int i = 0; i < nroots; i++) {
+                if (root_done && root_done[i]) continue;
+                printf("  root %d : %.9f %s\n", root_lo + i, times[i],
+                       oks[i] ? "ok" : "FAIL");
+            }
+
+            if (out_json) {
+                for (int i = 0; i < nroots; i++) {
+                    if (root_done && root_done[i]) continue;
+                    int r = root_lo + i;
+                    char path[4096];
+                    snprintf(path, sizeof(path), "%s_R%d.json", out_json, r);
+                    FILE *jfp = fopen(path, "w");
+                    if (jfp) {
+                        fprintf(jfp,
+                            "{\n"
+                            "  \"algorithm\": \"%s\",\n"
+                            "  \"nodes\": %d,\n"
+                            "  \"msg_bytes\": %d,\n"
+                            "  \"nchunks\": %d,\n"
+                            "  \"root\": %d,\n"
+                            "  \"time_sec\": %.9f,\n"
+                            "  \"correct\": %s\n"
+                            "}\n",
+                            algo, nodes_val, nbytes, reported_nchunks,
+                            r, times[i],
+                            oks[i] ? "true" : "false");
+                        fclose(jfp);
+                    } else {
+                        fprintf(stderr,
+                            "Warning: could not open %s for writing\n", path);
+                    }
+                }
+            }
         } else {
             printf("algorithm : %s\n", algo);
             printf("nodes     : %d\n", max_compute_rank > 0 ? max_compute_rank : size);
@@ -3171,7 +3252,7 @@ int main(int argc, char **argv)
         }
     }
 
-    free(times); free(oks);
+    free(times); free(oks); free(root_done);
     MPI_Finalize();
     return 0;
 }
