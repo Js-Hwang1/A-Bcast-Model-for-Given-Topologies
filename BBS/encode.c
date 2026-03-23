@@ -101,8 +101,12 @@ static topo_type_t detect_topo_type(const int *node_deg, int N)
      * N=128 (npn=2) → deg=1, N=256 (npn=4) → deg=3, etc.
      * Must be N = 64*npn with npn = min_deg+1.
      * Check BEFORE mesh since npn=4 dragonfly has deg=3 which overlaps mesh range. */
-    if (min_deg == max_deg && N >= 8 && N % 64 == 0 && N / 64 == min_deg + 1)
-        return BBS_TOPO_DRAGONFLY;
+    if (min_deg == max_deg && N >= 8) {
+        int npn = min_deg + 1;
+        /* 16 = NCHASSIS * NROUTERS (always 4*4, fixed) */
+        if (npn >= 1 && N % (16 * npn) == 0)
+            return BBS_TOPO_DRAGONFLY;
+    }
 
     /* 2D mesh: min degree 2 (corners), max degree 4 (interior) */
     if (min_deg >= 2 && max_deg <= 4)
@@ -515,214 +519,57 @@ static int dfly_use_shallow = 0; /* 0 = deep hierarchical, 1 = shallow relay pai
 #define DFLY_CHASSIS(v) (((v) % (dfly_npn * 16)) / (dfly_npn * 4))
 #define DFLY_ROUTER(v)  (((v) % (dfly_npn * 4)) / dfly_npn)
 #define DFLY_SIBLING(v) ((v) ^ 1)
-#define NGROUPS 4
+#define DFLY_MAX_GROUPS 32
+static int dfly_ngroups = 4;  /* set in dragonfly_compute_trees */
 #define NCHASSIS 4
 #define NROUTERS 4
 
-typedef struct { int par; int *nodes; int cnt; } dfly_task_t;
 
-/* Build one hierarchy-aware tree.
- * t0_fan: if non-NULL, soft-penalize T0-internal nodes when picking reps.
- *         Inflates latency by 50% per unit of T0 fanout. */
-static void dfly_build_one_tree(int16_t *tree, int root, int N,
-                                const float *lat, const int *t0_fan)
-{
-    for (int i = 0; i < N; i++) tree[i] = -1;
-
-    #define DFLY_QMAX 512
-    dfly_task_t q[DFLY_QMAX];
-    int qh = 0, qt = 0;
-
-    /* Initial task: all non-root nodes */
-    {
-        int *nc = (int *)malloc((N - 1) * sizeof(int));
-        int c = 0;
-        for (int i = 0; i < N; i++)
-            if (i != root) nc[c++] = i;
-        q[qt].par = root;
-        q[qt].nodes = nc;
-        q[qt].cnt = c;
-        qt++;
-    }
-
-    while (qh < qt) {
-        dfly_task_t tk = q[qh++];
-        int par = tk.par;
-
-        if (tk.cnt == 0) { free(tk.nodes); continue; }
-        if (tk.cnt == 1) {
-            tree[tk.nodes[0]] = (int16_t)par;
-            free(tk.nodes); continue;
-        }
-
-        int par_g = DFLY_GROUP(par);
-        int par_c = DFLY_CHASSIS(par);
-        int par_r = DFLY_ROUTER(par);
-
-        /* Count distinct groups, chassis, routers in node set */
-        char has_group[NGROUPS] = {0};
-        char has_chassis[NCHASSIS] = {0};
-        char has_router[NROUTERS] = {0};
-        int n_groups = 0, n_chassis = 0, n_routers = 0;
-
-        for (int i = 0; i < tk.cnt; i++) {
-            int v = tk.nodes[i];
-            int g = DFLY_GROUP(v), c = DFLY_CHASSIS(v), r = DFLY_ROUTER(v);
-            if (!has_group[g]) { has_group[g] = 1; n_groups++; }
-            if (g == par_g && !has_chassis[c]) { has_chassis[c] = 1; n_chassis++; }
-            if (g == par_g && c == par_c && !has_router[r]) { has_router[r] = 1; n_routers++; }
-        }
-
-        /* Split strategy: chain at group level, balanced at lower levels.
-         *   4 groups  → parent's group vs others    (chain, 3 steps)
-         *   4 chassis → {parent's+1} vs {other 2}  (balanced, 2 steps)
-         *   4 routers → {parent's+1} vs {other 2}  (balanced, 2 steps)
-         *   2 siblings → sibling edge               (1 step)
-         *
-         * Chain at group level keeps node 1 (R0-C0-G0) as the G0 rep,
-         * avoiding reverse black traffic from non-C0 chassis back to C0.
-         * Balanced group splits use up both R0-C0 nodes for global work,
-         * forcing a non-C0 node as G0 rep → extra green→black routing.
-         * Gateway-aware rep selection ensures R0 nodes are picked when
-         * distributing across multiple chassis.
-         * Total depth = 3+2+2+1 = 8.
-         */
-        int *left  = (int *)malloc(tk.cnt * sizeof(int));
-        int *right = (int *)malloc(tk.cnt * sizeof(int));
-        int lcnt = 0, rcnt = 0;
-
-        if (n_groups > 1) {
-            /* Chain split: parent's group vs all others.
-             * Keeps node 1 (R0-C0) as G0 rep → direct black links to other
-             * chassis, no reverse green→black routing overhead.
-             * Depth cost: 3 steps for 4 groups (vs balanced's 2), but
-             * avoids max_black=2 and extra green contention. */
-            int par_group_present = has_group[par_g];
-            if (par_group_present) {
-                for (int i = 0; i < tk.cnt; i++) {
-                    if (DFLY_GROUP(tk.nodes[i]) == par_g)
-                        left[lcnt++] = tk.nodes[i];
-                    else
-                        right[rcnt++] = tk.nodes[i];
-                }
-            } else {
-                int group_list[NGROUPS], ng = 0;
-                for (int g = 0; g < NGROUPS; g++)
-                    if (has_group[g]) group_list[ng++] = g;
-                int mid = ng / 2;
-                if (mid < 1) mid = 1;
-                char left_group[NGROUPS] = {0};
-                for (int gi = 0; gi < mid; gi++)
-                    left_group[group_list[gi]] = 1;
-                for (int i = 0; i < tk.cnt; i++) {
-                    if (left_group[DFLY_GROUP(tk.nodes[i])])
-                        left[lcnt++] = tk.nodes[i];
-                    else
-                        right[rcnt++] = tk.nodes[i];
-                }
-            }
-        } else if (n_chassis > 1) {
-            /* Balanced binary split: parent's chassis in left half.
-             * Depth 2 for 4 chassis (vs chain's depth 3).
-             * Rep selection still prefers R0 gateway nodes (lowest
-             * latency), so cross-chassis edges stay on black links. */
-            int ch_list[NCHASSIS], nc_ch = 0;
-            if (has_chassis[par_c]) ch_list[nc_ch++] = par_c;
-            for (int c = 0; c < NCHASSIS; c++)
-                if (has_chassis[c] && c != par_c) ch_list[nc_ch++] = c;
-            int mid_c = nc_ch / 2;
-            if (mid_c < 1) mid_c = 1;
-            char left_ch[NCHASSIS] = {0};
-            for (int ci = 0; ci < mid_c; ci++)
-                left_ch[ch_list[ci]] = 1;
-            for (int i = 0; i < tk.cnt; i++) {
-                if (left_ch[DFLY_CHASSIS(tk.nodes[i])])
-                    left[lcnt++] = tk.nodes[i];
-                else
-                    right[rcnt++] = tk.nodes[i];
-            }
-        } else if (n_routers > 1) {
-            /* Balanced binary split: parent's router in left half.
-             * Depth 2 for 4 routers (vs chain's depth 3).
-             * All splits still land on green links within chassis. */
-            int rt_list[NROUTERS], nr_rt = 0;
-            if (has_router[par_r]) rt_list[nr_rt++] = par_r;
-            for (int r = 0; r < NROUTERS; r++)
-                if (has_router[r] && r != par_r) rt_list[nr_rt++] = r;
-            int mid_r = nr_rt / 2;
-            if (mid_r < 1) mid_r = 1;
-            char left_rt[NROUTERS] = {0};
-            for (int ri = 0; ri < mid_r; ri++)
-                left_rt[rt_list[ri]] = 1;
-            for (int i = 0; i < tk.cnt; i++) {
-                if (left_rt[DFLY_ROUTER(tk.nodes[i])])
-                    left[lcnt++] = tk.nodes[i];
-                else
-                    right[rcnt++] = tk.nodes[i];
-            }
-        } else {
-            /* Sibling level: just split into 2 */
-            left[lcnt++] = tk.nodes[0];
-            if (tk.cnt > 1) right[rcnt++] = tk.nodes[1];
-        }
-
-        free(tk.nodes);
-
-        /* Pick rep from each half: closest to parent.
-         * When t0_fan is provided (building T1), inflate latency by 50%
-         * per unit of T0 fanout to steer away from T0-internal nodes. */
-        #define DFLY_PICK_REP(arr, acnt) do {                              \
-            if ((acnt) <= 0) { free(arr); break; }                         \
-            int _best = 0;                                                 \
-            float _bd = lat[(size_t)par * N + (arr)[0]];                  \
-            if (t0_fan) _bd *= (1.0f + 0.5f * t0_fan[(arr)[0]]);         \
-            for (int _i = 1; _i < (acnt); _i++) {                         \
-                float _d = lat[(size_t)par * N + (arr)[_i]];              \
-                if (t0_fan) _d *= (1.0f + 0.5f * t0_fan[(arr)[_i]]);     \
-                if (_d < _bd) { _bd = _d; _best = _i; }                   \
-            }                                                              \
-            int _rep = (arr)[_best];                                       \
-            tree[_rep] = (int16_t)par;                                     \
-            (arr)[_best] = (arr)[(acnt) - 1];                             \
-            (acnt)--;                                                      \
-            if ((acnt) > 0) {                                              \
-                q[qt].par = _rep;                                          \
-                q[qt].nodes = (arr);                                       \
-                q[qt].cnt = (acnt);                                        \
-                qt++;                                                      \
-            } else {                                                       \
-                free(arr);                                                 \
-            }                                                              \
-        } while(0)
-
-        DFLY_PICK_REP(left, lcnt);
-        DFLY_PICK_REP(right, rcnt);
-
-        #undef DFLY_PICK_REP
-    }
-    #undef DFLY_QMAX
-}
-
-/* Compute physical link congestion for a set of trees and print stats */
+/* Compute physical link congestion for a set of trees and print stats.
+ * lat may be NULL (early detection path — skip physical congestion). */
 static void dfly_print_stats(int16_t **trees, int tau, int root, int N,
                               const float *lat)
 {
+    (void)lat;
+
+    /* Nc = number of compute nodes; router ranks are Nc..N-1 */
+    int Nc = dfly_ngroups * NCHASSIS * NROUTERS * dfly_npn;
+    int rtr_base = Nc;
+
     /* Aggregate physical link congestion across ALL trees */
-    int blue_cong[NGROUPS][NGROUPS];
-    int black_cong[NGROUPS][NCHASSIS][NCHASSIS];
-    int green_cong[NGROUPS][NCHASSIS][NROUTERS][NROUTERS];
+    int blue_cong[DFLY_MAX_GROUPS][DFLY_MAX_GROUPS];
+    int black_cong[DFLY_MAX_GROUPS][NCHASSIS][NCHASSIS];
+    int green_cong[DFLY_MAX_GROUPS][NCHASSIS][NROUTERS][NROUTERS];
     memset(blue_cong, 0, sizeof(blue_cong));
     memset(black_cong, 0, sizeof(black_cong));
     memset(green_cong, 0, sizeof(green_cong));
-    int uplink_load[1024] = {0};
+    int *uplink_load = (int *)calloc(N, sizeof(int));
 
     for (int t = 0; t < tau; t++) {
         int16_t *tree = trees[t];
         for (int i = 0; i < N; i++) {
             if (tree[i] < 0) continue;
             int p = tree[i];
-            int ig = DFLY_GROUP(i), ic = DFLY_CHASSIS(i), ir = DFLY_ROUTER(i);
-            int pg = DFLY_GROUP(p), pc = DFLY_CHASSIS(p), pr = DFLY_ROUTER(p);
+            int ig, ic, ir, pg, pc, pr;
+
+            /* Extract g/c/r for node i */
+            if (i < Nc) {
+                ig = DFLY_GROUP(i); ic = DFLY_CHASSIS(i); ir = DFLY_ROUTER(i);
+            } else {
+                int ri = i - rtr_base;
+                ig = ri / (NCHASSIS * NROUTERS);
+                ic = (ri % (NCHASSIS * NROUTERS)) / NROUTERS;
+                ir = ri % NROUTERS;
+            }
+            /* Extract g/c/r for parent p */
+            if (p < Nc) {
+                pg = DFLY_GROUP(p); pc = DFLY_CHASSIS(p); pr = DFLY_ROUTER(p);
+            } else {
+                int rp = p - rtr_base;
+                pg = rp / (NCHASSIS * NROUTERS);
+                pc = (rp % (NCHASSIS * NROUTERS)) / NROUTERS;
+                pr = rp % NROUTERS;
+            }
 
             uplink_load[i]++;
             uplink_load[p]++;
@@ -747,14 +594,14 @@ static void dfly_print_stats(int16_t **trees, int tau, int root, int N,
     }
 
     int max_blue = 0, max_black = 0, max_green = 0, max_uplink = 0;
-    for (int g1 = 0; g1 < NGROUPS; g1++)
-        for (int g2 = g1+1; g2 < NGROUPS; g2++)
+    for (int g1 = 0; g1 < dfly_ngroups; g1++)
+        for (int g2 = g1+1; g2 < dfly_ngroups; g2++)
             if (blue_cong[g1][g2] > max_blue) max_blue = blue_cong[g1][g2];
-    for (int g = 0; g < NGROUPS; g++)
+    for (int g = 0; g < dfly_ngroups; g++)
         for (int c1 = 0; c1 < NCHASSIS; c1++)
             for (int c2 = c1+1; c2 < NCHASSIS; c2++)
                 if (black_cong[g][c1][c2] > max_black) max_black = black_cong[g][c1][c2];
-    for (int g = 0; g < NGROUPS; g++)
+    for (int g = 0; g < dfly_ngroups; g++)
         for (int c = 0; c < NCHASSIS; c++)
             for (int r1 = 0; r1 < NROUTERS; r1++)
                 for (int r2 = r1+1; r2 < NROUTERS; r2++)
@@ -766,7 +613,7 @@ static void dfly_print_stats(int16_t **trees, int tau, int root, int N,
     for (int t = 0; t < tau; t++) {
         int16_t *tree = trees[t];
         int d = tree_depth(tree, N);
-        int tfan[1024] = {0};
+        int *tfan = (int *)calloc(N, sizeof(int));
         int max_fan = 0;
         for (int i = 0; i < N; i++)
             if (tree[i] >= 0) tfan[(int)tree[i]]++;
@@ -787,11 +634,13 @@ static void dfly_print_stats(int16_t **trees, int tau, int root, int N,
         fprintf(stderr, "\n");
         if (covered != N)
             fprintf(stderr, "DFLY: WARNING: T%d spans only %d/%d!\n", t, covered, N);
+        free(tfan);
     }
 
     /* Anti-correlation analysis */
     if (tau == 2) {
-        int fan0[1024] = {0}, fan1[1024] = {0};
+        int *fan0 = (int *)calloc(N, sizeof(int));
+        int *fan1 = (int *)calloc(N, sizeof(int));
         for (int i = 0; i < N; i++) {
             if (trees[0][i] >= 0) fan0[(int)trees[0][i]]++;
             if (trees[1][i] >= 0) fan1[(int)trees[1][i]]++;
@@ -808,6 +657,7 @@ static void dfly_print_stats(int16_t **trees, int tau, int root, int N,
         fprintf(stderr, "DFLY: anti-corr: parent_overlap=%d both_int=%d "
                 "anti_corr=%d both_leaf=%d\n",
                 parent_overlap, both_internal, anti_corr, both_leaf);
+        free(fan0); free(fan1);
     }
 
     /* Uplink congestion histogram */
@@ -823,86 +673,12 @@ static void dfly_print_stats(int16_t **trees, int tau, int root, int N,
         if (uplink_hist[u] > 0) fprintf(stderr, " [%d]=%d", u, uplink_hist[u]);
     fprintf(stderr, "\n");
     fprintf(stderr, "DFLY: blue links:");
-    for (int g1 = 0; g1 < NGROUPS; g1++)
-        for (int g2 = g1+1; g2 < NGROUPS; g2++)
+    for (int g1 = 0; g1 < dfly_ngroups; g1++)
+        for (int g2 = g1+1; g2 < dfly_ngroups; g2++)
             if (blue_cong[g1][g2] > 0)
                 fprintf(stderr, " [%d-%d]=%d", g1, g2, blue_cong[g1][g2]);
     fprintf(stderr, "\n");
-}
-
-/* Build the interleaved global+local dissemination tree.
- *
- * At each hierarchy level, uses binary dissemination (depth=2 for 4 entities).
- * Root's children are interleaved: global(blue), local(green), global(blue),
- * local(black), global(green), local(green), local(red).
- *
- * The key idea: while root seeds a remote group, previously-seeded nodes
- * do LOCAL diffusion on different physical links simultaneously.
- *
- * Depth = 7 (2 group + 2 chassis + 2 router + 1 sibling).
- * Fanout = 7 at root, 6 at group reps, 5 at chassis reps.
- * Each hierarchy level's rep is always at (router=0, chassis=0) for
- * clean gateway routing.
- */
-static void dfly_build_interleaved_tree(int16_t *tree, int root, int N)
-{
-    (void)N;  /* we know N=128 */
-    for (int i = 0; i < 128; i++) tree[i] = -1;
-
-    int rg = DFLY_GROUP(root);
-    int rc = DFLY_CHASSIS(root);
-    int rr = DFLY_ROUTER(root);
-    int rb = rg*32 + rc*8 + rr*2;  /* base of root's router */
-
-    /* Group level: binary dissemination among 4 groups.
-     * root_group → g1, root_group → g2, g1 → g3
-     * Reps are always (g, 0, 0, 0) — group gateways. */
-    int greps[NGROUPS];
-    for (int g = 0; g < NGROUPS; g++) greps[g] = g * 32;
-
-    /* Sort non-root groups by distance from root group */
-    int gsorted[NGROUPS-1], gn = 0;
-    for (int g = 0; g < NGROUPS; g++)
-        if (g != rg) gsorted[gn++] = g;
-
-    /* Binary dissemination: root→g[0], root→g[1], g[0]→g[2] */
-    tree[greps[gsorted[0]]] = greps[rg];
-    tree[greps[gsorted[1]]] = greps[rg];
-    if (gn > 2)
-        tree[greps[gsorted[2]]] = greps[gsorted[0]];
-
-    /* Chassis level per group: binary dissemination among 4 chassis.
-     * For each group, the group gateway (g,0,0,0) seeds chassis.
-     * (g,0,0,0) → (g,1,0,0), (g,0,0,0) → (g,2,0,0), (g,1,0,0) → (g,3,0,0) */
-    for (int g = 0; g < NGROUPS; g++) {
-        int gb = g * 32;
-        tree[gb + 8]  = gb;       /* C0 → C1 */
-        tree[gb + 16] = gb;       /* C0 → C2 */
-        tree[gb + 24] = gb + 8;   /* C1 → C3 */
-    }
-
-    /* Router level per chassis: binary dissemination among 4 routers.
-     * (g,c,0,0) → (g,c,1,0), (g,c,0,0) → (g,c,2,0), (g,c,1,0) → (g,c,3,0) */
-    for (int g = 0; g < NGROUPS; g++)
-        for (int c = 0; c < NCHASSIS; c++) {
-            int cb = g*32 + c*8;
-            tree[cb + 2] = cb;       /* R0 → R1 */
-            tree[cb + 4] = cb;       /* R0 → R2 */
-            tree[cb + 6] = cb + 2;   /* R1 → R3 */
-        }
-
-    /* Sibling level: even node → odd node */
-    for (int g = 0; g < NGROUPS; g++)
-        for (int c = 0; c < NCHASSIS; c++)
-            for (int r = 0; r < NROUTERS; r++) {
-                int b = g*32 + c*8 + r*2;
-                tree[b + 1] = b;
-            }
-
-    /* Fix root: if root is not (0,0,0,0), we need to graft root into
-     * the tree.  For now, this assumes root=0 (the gateway node). */
-    if (root != 0)
-        fprintf(stderr, "DFLY: WARNING: interleaved tree only supports root=0\n");
+    free(uplink_load);
 }
 
 /* Build tau=2 hierarchical anti-correlated trees for dragonfly.
@@ -929,22 +705,25 @@ static void dfly_build_interleaved_tree(int16_t *tree, int root, int N)
  * Binary-dissemination at each level: group, chassis, router, sibling.
  * Good for small messages where low depth dominates. */
 /* Hierarchical trees with K4 relay pattern at each level.
- * K4 relay pattern at each level: node, router, chassis, group.
- * Better pipeline throughput for large messages.
+ * Levels: node (within router), router (within chassis),
+ *         chassis (within group), group (global).
  *
- * shallow=0 (deep):    cross-level edges go leaf(src) → root(dst).
+ * At each level, designate INGRESS (receives from above, union deg 2)
+ * and EGRESS (sends to below, union deg 2).
+ *
+ * shallow=0 (deep):    cross-level edges go egress(src) → ingress(dst).
  *                      Data traverses full sub-tree before crossing levels.
  *                      Deeper tree, better pipeline throughput.
- * shallow=1 (shallow): cross-level edges go root(src) → root(dst).
- *                      Root fans out to both sub-tree children and next level.
+ * shallow=1 (shallow): cross-level edges go ingress(src) → ingress(dst).
+ *                      Ingress does double duty (local sub-tree + cross-level).
  *                      Shallower tree, lower startup latency. */
 static void dfly_build_hierarchical_trees(int16_t *t0, int16_t *t1,
                                            int root, int N, int shallow)
 {
-    int npn = N / 64;           /* nodes per router */
-    int n_rtrs = N / npn;       /* 64 */
-    int n_ch   = n_rtrs / NROUTERS;  /* 16 */
-    (void)n_ch;
+    int npn = dfly_npn;
+    int Nc = dfly_ngroups * NCHASSIS * NROUTERS * npn;
+    int n_rtrs = Nc / npn;
+    int rtr_base = Nc;  /* first router rank */
 
     for (int i = 0; i < N; i++) { t0[i] = -1; t1[i] = -1; }
 
@@ -952,127 +731,168 @@ static void dfly_build_hierarchical_trees(int16_t *t0, int16_t *t1,
     int root_c = DFLY_CHASSIS(root);
     int root_r = DFLY_ROUTER(root);
 
-    /* --- Step 0: Root/Leaf identification (before any tree generation) --- */
+    /* --- Step 0: Ingress/Egress identification ---
+     *
+     * With router relays, cross-level edges insert router MPI ranks:
+     *   ingress_node[dst_rtr] → rtr_rank[dst_rtr] → rtr_rank[src_rtr]
+     * The root's own router connects to egress_node[root_rtr]. */
 
-    /* Per-router: root_node / leaf_node (compute node IDs) */
-    int rnode[64], lnode[64];
+    /* Per-router: ingress/egress compute node IDs */
+    int *ingress_node = (int *)malloc(n_rtrs * sizeof(int));
+    int *egress_node  = (int *)malloc(n_rtrs * sizeof(int));
     for (int rtr = 0; rtr < n_rtrs; rtr++) {
         int base = rtr * npn;
-        int g = rtr / 16, cl = (rtr % 16) / 4, rl = rtr % 4;
+        int g = rtr / (NCHASSIS * NROUTERS);
+        int cl = (rtr % (NCHASSIS * NROUTERS)) / NROUTERS;
+        int rl = rtr % NROUTERS;
         if (g == root_g && cl == root_c && rl == root_r) {
-            rnode[rtr] = root;
-            lnode[rtr] = (npn == 2)
+            ingress_node[rtr] = root;
+            egress_node[rtr] = (npn == 2)
                 ? (root == base ? base + 1 : base)
                 : (root == base + npn - 1 ? base + npn - 2 : base + npn - 1);
         } else {
-            rnode[rtr] = base;
-            lnode[rtr] = base + npn - 1;
+            ingress_node[rtr] = base;
+            egress_node[rtr] = base + npn - 1;
         }
     }
 
-    /* Per-chassis: root/leaf router (local index 0..3) */
-    int rrouter[16], lrouter[16];
-    for (int ch = 0; ch < 16; ch++) {
-        int g = ch / 4, cl = ch % 4;
+    /* Per-chassis: ingress/egress router (local index 0..3) */
+    int total_ch = dfly_ngroups * NCHASSIS;
+    int *ingress_rtr = (int *)malloc(total_ch * sizeof(int));
+    int *egress_rtr  = (int *)malloc(total_ch * sizeof(int));
+    for (int ch = 0; ch < total_ch; ch++) {
+        int g = ch / NCHASSIS, cl = ch % NCHASSIS;
         if (g == root_g && cl == root_c) {
-            rrouter[ch] = root_r;
-            lrouter[ch] = (root_r == NROUTERS - 1)
-                           ? NROUTERS - 2 : NROUTERS - 1;
+            ingress_rtr[ch] = root_r;
+            egress_rtr[ch] = (root_r == NROUTERS - 1)
+                              ? NROUTERS - 2 : NROUTERS - 1;
         } else {
-            rrouter[ch] = 0;
-            lrouter[ch] = NROUTERS - 1;
+            ingress_rtr[ch] = 0;
+            egress_rtr[ch] = NROUTERS - 1;
         }
     }
 
-    /* Per-group: root/leaf chassis (local index 0..3) */
-    int rchassis[NGROUPS], lchassis[NGROUPS];
-    for (int g = 0; g < NGROUPS; g++) {
+    /* Per-group: ingress/egress chassis (local index 0..3) */
+    int ingress_ch[DFLY_MAX_GROUPS], egress_ch[DFLY_MAX_GROUPS];
+    for (int g = 0; g < dfly_ngroups; g++) {
         if (g == root_g) {
-            rchassis[g] = root_c;
-            lchassis[g] = (root_c == NCHASSIS - 1)
-                           ? NCHASSIS - 2 : NCHASSIS - 1;
+            ingress_ch[g] = root_c;
+            egress_ch[g] = (root_c == NCHASSIS - 1)
+                            ? NCHASSIS - 2 : NCHASSIS - 1;
         } else {
-            rchassis[g] = 0;
-            lchassis[g] = NCHASSIS - 1;
+            ingress_ch[g] = 0;
+            egress_ch[g] = NCHASSIS - 1;
         }
     }
 
-    /* Global: root/leaf group */
-    int lgroup = (root_g == NGROUPS - 1) ? NGROUPS - 2 : NGROUPS - 1;
+    /* Global: leaf group (egress target at group level) */
+    int leaf_group = (root_g == dfly_ngroups - 1) ? dfly_ngroups - 2 : dfly_ngroups - 1;
 
-    /* --- Step 1: Node-level trees (within each router) --- */
+    /* --- Step 1: Node-level trees (within each router) ---
+     * Unchanged — only touches compute ranks 0..Nc-1.
+     * No router relay needed (same physical router). */
     for (int rtr = 0; rtr < n_rtrs; rtr++) {
-        int rn = rnode[rtr], ln = lnode[rtr];
+        int in_n = ingress_node[rtr], eg_n = egress_node[rtr];
         if (npn == 2) {
-            t0[ln] = (int16_t)rn;
-            t1[ln] = (int16_t)rn;
+            t0[eg_n] = (int16_t)in_n;
+            t1[eg_n] = (int16_t)in_n;
         } else if (npn >= 4) {
             int base = rtr * npn;
-            int interior[62], ni = 0;
+            int ord[64], on = 0;
+            ord[on++] = in_n;
             for (int i = base; i < base + npn; i++)
-                if (i != rn && i != ln) interior[ni++] = i;
-            if (ni == 2) {
-                /* K4 relay */
-                t0[interior[0]] = (int16_t)rn;
-                t0[interior[1]] = (int16_t)interior[0];
-                t0[ln]          = (int16_t)interior[0];
-                t1[interior[1]] = (int16_t)rn;
-                t1[interior[0]] = (int16_t)interior[1];
-                t1[ln]          = (int16_t)interior[1];
-            } else {
-                /* npn>4 chain fallback */
-                int prev = rn;
-                for (int i = 0; i < ni; i++) {
-                    t0[interior[i]] = (int16_t)prev;
-                    t1[interior[i]] = (int16_t)prev;
-                    prev = interior[i];
+                if (i != in_n && i != eg_n) ord[on++] = i;
+            ord[on++] = eg_n;
+
+            for (int i = 1; i < on; i++)
+                t0[ord[i]] = (int16_t)ord[i / 2];
+
+            int sigma[64];
+            for (int i = 0; i < on; i++) sigma[i] = i;
+            int half = (on - 2) / 2;
+            for (int i = 1; i <= half; i++) {
+                int j = i + half;
+                if (j < on - 1) {
+                    int tmp = sigma[i]; sigma[i] = sigma[j]; sigma[j] = tmp;
                 }
-                t0[ln] = (int16_t)prev;
-                t1[ln] = (int16_t)prev;
             }
+            for (int i = 1; i < on; i++)
+                t1[ord[sigma[i]]] = (int16_t)ord[sigma[i / 2]];
         }
     }
 
-    /* --- Steps 2+3: Router-level trees + connect to node trees --- */
-    for (int ch = 0; ch < 16; ch++) {
-        int rr = rrouter[ch], rl = lrouter[ch];
-        int interior[2], ni = 0;
-        for (int r = 0; r < NROUTERS; r++)
-            if (r != rr && r != rl) interior[ni++] = r;
-        if (interior[0] > interior[1])
-            { int tmp = interior[0]; interior[0] = interior[1]; interior[1] = tmp; }
+    /* --- Steps 2+3: Router-level trees + cross-level connect ---
+     * With router relays:
+     *   ingress_node[dst] → rtr_rank[dst] → rtr_rank[src]
+     * (instead of old: ingress_node[dst] → egress_node[src]) */
+    for (int ch = 0; ch < total_ch; ch++) {
+        int in_r = ingress_rtr[ch], eg_r = egress_rtr[ch];
 
-        /* K4 relay: T0: root→I0→{I1,leaf}, T1: root→I1→{I0,leaf} */
+        int ord[NROUTERS], on = 0;
+        ord[on++] = in_r;
+        for (int r = 0; r < NROUTERS; r++)
+            if (r != in_r && r != eg_r) ord[on++] = r;
+        ord[on++] = eg_r;
+
         int rpar[2][NROUTERS];
         for (int r = 0; r < NROUTERS; r++) { rpar[0][r] = -1; rpar[1][r] = -1; }
-        rpar[0][interior[0]] = rr;  rpar[0][interior[1]] = interior[0];  rpar[0][rl] = interior[0];
-        rpar[1][interior[1]] = rr;  rpar[1][interior[0]] = interior[1];  rpar[1][rl] = interior[1];
+        for (int i = 1; i < on; i++)
+            rpar[0][ord[i]] = ord[i / 2];
 
-        /* Connect: for each router-tree edge, add node-to-node tree edge.
-         * Deep: leaf(src) → root(dst).  Shallow: root(src) → root(dst). */
+        int sigma[NROUTERS];
+        for (int i = 0; i < on; i++) sigma[i] = i;
+        int half = (on - 2) / 2;
+        for (int i = 1; i <= half; i++) {
+            int j = i + half;
+            if (j < on - 1) {
+                int tmp = sigma[i]; sigma[i] = sigma[j]; sigma[j] = tmp;
+            }
+        }
+        for (int i = 1; i < on; i++)
+            rpar[1][ord[sigma[i]]] = ord[sigma[i / 2]];
+
+        /* Router relay cross-connect */
         int16_t *tt[2] = { t0, t1 };
         for (int t = 0; t < 2; t++)
             for (int r = 0; r < NROUTERS; r++) {
                 if (rpar[t][r] < 0) continue;
-                int dst = ch * NROUTERS + r;
+                int dst = ch * NROUTERS + r;        /* global router index */
                 int src = ch * NROUTERS + rpar[t][r];
-                tt[t][rnode[dst]] = (int16_t)(shallow ? rnode[src] : lnode[src]);
+                int dst_rtr_rank = rtr_base + dst;
+                int src_rtr_rank = rtr_base + src;
+                tt[t][ingress_node[dst]] = (int16_t)dst_rtr_rank;
+                tt[t][dst_rtr_rank] = (int16_t)src_rtr_rank;
             }
     }
 
-    /* --- Steps 4+5: Chassis-level trees + connect --- */
-    for (int g = 0; g < NGROUPS; g++) {
-        int rc = rchassis[g], lc = lchassis[g];
-        int interior[2], ni = 0;
+    /* --- Steps 4+5: Chassis-level trees + cross-level connect ---
+     * With router relays:
+     *   ingress_node[dst_rtr] → rtr_rank[dst_rtr] → rtr_rank[src_rtr] */
+    for (int g = 0; g < dfly_ngroups; g++) {
+        int in_c = ingress_ch[g], eg_c = egress_ch[g];
+
+        int ord[NCHASSIS], on = 0;
+        ord[on++] = in_c;
         for (int c = 0; c < NCHASSIS; c++)
-            if (c != rc && c != lc) interior[ni++] = c;
-        if (interior[0] > interior[1])
-            { int tmp = interior[0]; interior[0] = interior[1]; interior[1] = tmp; }
+            if (c != in_c && c != eg_c) ord[on++] = c;
+        ord[on++] = eg_c;
 
         int cpar[2][NCHASSIS];
         for (int c = 0; c < NCHASSIS; c++) { cpar[0][c] = -1; cpar[1][c] = -1; }
-        cpar[0][interior[0]] = rc;  cpar[0][interior[1]] = interior[0];  cpar[0][lc] = interior[0];
-        cpar[1][interior[1]] = rc;  cpar[1][interior[0]] = interior[1];  cpar[1][lc] = interior[1];
+        for (int i = 1; i < on; i++)
+            cpar[0][ord[i]] = ord[i / 2];
+
+        int sigma[NCHASSIS];
+        for (int i = 0; i < on; i++) sigma[i] = i;
+        int half = (on - 2) / 2;
+        for (int i = 1; i <= half; i++) {
+            int j = i + half;
+            if (j < on - 1) {
+                int tmp = sigma[i]; sigma[i] = sigma[j]; sigma[j] = tmp;
+            }
+        }
+        for (int i = 1; i < on; i++)
+            cpar[1][ord[sigma[i]]] = ord[sigma[i / 2]];
 
         int16_t *tt[2] = { t0, t1 };
         for (int t = 0; t < 2; t++)
@@ -1080,42 +900,82 @@ static void dfly_build_hierarchical_trees(int16_t *t0, int16_t *t1,
                 if (cpar[t][c] < 0) continue;
                 int dst_ch = g * NCHASSIS + c;
                 int src_ch = g * NCHASSIS + cpar[t][c];
-                int dst_rtr = dst_ch * NROUTERS + rrouter[dst_ch];
-                int src_rtr = src_ch * NROUTERS +
-                    (shallow ? rrouter[src_ch] : lrouter[src_ch]);
-                tt[t][rnode[dst_rtr]] =
-                    (int16_t)(shallow ? rnode[src_rtr] : lnode[src_rtr]);
+                int dst_rtr = dst_ch * NROUTERS + ingress_rtr[dst_ch];
+                int src_rtr = src_ch * NROUTERS + egress_rtr[src_ch];
+                int dst_rtr_rank = rtr_base + dst_rtr;
+                int src_rtr_rank = rtr_base + src_rtr;
+                tt[t][dst_rtr_rank] = (int16_t)src_rtr_rank;
+                tt[t][ingress_node[dst_rtr]] = (int16_t)dst_rtr_rank;
             }
     }
 
-    /* --- Steps 6+7: Group-level trees + connect --- */
+    /* --- Steps 6+7: Group-level trees + cross-level connect ---
+     * With router relays:
+     *   ingress_node[dst_rtr] → rtr_rank[dst_rtr] → rtr_rank[src_rtr] */
     {
-        int interior[2], ni = 0;
-        for (int g = 0; g < NGROUPS; g++)
-            if (g != root_g && g != lgroup) interior[ni++] = g;
-        if (interior[0] > interior[1])
-            { int tmp = interior[0]; interior[0] = interior[1]; interior[1] = tmp; }
+        int ng = dfly_ngroups;
+        int ord[DFLY_MAX_GROUPS];
+        int n = 0;
+        ord[n++] = root_g;
+        int interior[DFLY_MAX_GROUPS];
+        int ni = 0;
+        for (int g = 0; g < ng; g++)
+            if (g != root_g && g != leaf_group) interior[ni++] = g;
+        for (int i = 0; i < ni - 1; i++)
+            for (int j = i + 1; j < ni; j++)
+                if (interior[i] > interior[j])
+                    { int tmp = interior[i]; interior[i] = interior[j]; interior[j] = tmp; }
+        for (int i = 0; i < ni; i++)
+            ord[n++] = interior[i];
+        ord[n++] = leaf_group;
 
-        int gpar[2][NGROUPS];
-        for (int g = 0; g < NGROUPS; g++) { gpar[0][g] = -1; gpar[1][g] = -1; }
-        gpar[0][interior[0]] = root_g;  gpar[0][interior[1]] = interior[0];  gpar[0][lgroup] = interior[0];
-        gpar[1][interior[1]] = root_g;  gpar[1][interior[0]] = interior[1];  gpar[1][lgroup] = interior[1];
+        int gpar[2][DFLY_MAX_GROUPS];
+        for (int g = 0; g < ng; g++) { gpar[0][g] = -1; gpar[1][g] = -1; }
+
+        for (int i = 1; i < n; i++)
+            gpar[0][ord[i]] = ord[i / 2];
+
+        int sigma[DFLY_MAX_GROUPS];
+        for (int i = 0; i < n; i++) sigma[i] = i;
+        int h = (n - 2) / 2;
+        for (int i = 1; i <= h; i++) {
+            int j = i + h;
+            if (j < n - 1) {
+                int tmp = sigma[i]; sigma[i] = sigma[j]; sigma[j] = tmp;
+            }
+        }
+        for (int i = 1; i < n; i++)
+            gpar[1][ord[sigma[i]]] = ord[sigma[i / 2]];
 
         int16_t *tt[2] = { t0, t1 };
         for (int t = 0; t < 2; t++)
-            for (int g = 0; g < NGROUPS; g++) {
+            for (int g = 0; g < ng; g++) {
                 if (gpar[t][g] < 0) continue;
                 int sg = gpar[t][g];
-                int src_ch  = sg * NCHASSIS +
-                    (shallow ? rchassis[sg] : lchassis[sg]);
-                int src_rtr = src_ch * NROUTERS +
-                    (shallow ? rrouter[src_ch] : lrouter[src_ch]);
-                int dst_ch  = g * NCHASSIS + rchassis[g];
-                int dst_rtr = dst_ch * NROUTERS + rrouter[dst_ch];
-                tt[t][rnode[dst_rtr]] =
-                    (int16_t)(shallow ? rnode[src_rtr] : lnode[src_rtr]);
+                int src_ch  = sg * NCHASSIS + egress_ch[sg];
+                int src_rtr = src_ch * NROUTERS + egress_rtr[src_ch];
+                int dst_ch  = g * NCHASSIS + ingress_ch[g];
+                int dst_rtr = dst_ch * NROUTERS + ingress_rtr[dst_ch];
+                int dst_rtr_rank = rtr_base + dst_rtr;
+                int src_rtr_rank = rtr_base + src_rtr;
+                tt[t][dst_rtr_rank] = (int16_t)src_rtr_rank;
+                tt[t][ingress_node[dst_rtr]] = (int16_t)dst_rtr_rank;
             }
     }
+
+    /* --- Root's router: connect to egress_node ---
+     * The root's own router rank must have a parent in the tree.
+     * It points to egress_node[root_rtr] (which is a child of root
+     * in the node-level tree). */
+    {
+        int root_global_rtr = root_g * NCHASSIS * NROUTERS + root_c * NROUTERS + root_r;
+        t0[rtr_base + root_global_rtr] = (int16_t)egress_node[root_global_rtr];
+        t1[rtr_base + root_global_rtr] = (int16_t)egress_node[root_global_rtr];
+    }
+
+    (void)shallow;
+    free(ingress_node); free(egress_node);
+    free(ingress_rtr); free(egress_rtr);
 }
 
 static int dragonfly_compute_trees(const char *topo_file, int root, int N,
@@ -1124,36 +984,92 @@ static int dragonfly_compute_trees(const char *topo_file, int root, int N,
                                    int depth0,
                                    int16_t *parent_arrays, int *out_tau)
 {
-    (void)adj; (void)flink; (void)max_fl;
+    (void)flink; (void)max_fl;
     (void)bfs_order; (void)bfs_n; (void)depth0;
 
-    dfly_npn = N / 64;  /* nodes per router: N=128→2, N=256→4 */
+    int Nc, Nr;
 
-    topo_data_t td;
-    if (topo_data_load(topo_file, &td) != 0) {
-        fprintf(stderr, "DFLY: cannot load tdat\n");
+    if (!adj) {
+        /* Early detection path: read G,C,R,P from cfg file */
+        char dir[512] = {0};
+        strncpy(dir, topo_file, sizeof(dir) - 1);
+        char *sl = strrchr(dir, '/');
+        if (sl) *(sl + 1) = '\0';
+        else    strcpy(dir, "./");
+
+        int nc_from_name = 0;
+        const char *dp = strstr(topo_file, "dragonfly_");
+        if (dp) {
+            nc_from_name = atoi(dp + 10);
+        } else {
+            const char *tp = strstr(topo_file, "topo_");
+            if (tp) nc_from_name = atoi(tp + 5);
+        }
+        if (nc_from_name <= 0) {
+            fprintf(stderr, "DFLY: ERROR: cannot determine Nc from path\n");
+            *out_tau = 0;
+            return -1;
+        }
+
+        char cfg_path[512];
+        snprintf(cfg_path, sizeof(cfg_path), "%stopo_%d.cfg", dir, nc_from_name);
+        FILE *f = fopen(cfg_path, "r");
+        if (!f) {
+            fprintf(stderr, "DFLY: ERROR: cannot open %s\n", cfg_path);
+            *out_tau = 0;
+            return -1;
+        }
+        int dg = 0, dc = 0, dr = 0, dp2 = 0;
+        char line[128] = {0};
+        if (fgets(line, sizeof(line), f)) {
+            if (strncmp(line, "dragonfly", 9) == 0)
+                sscanf(line + 10, "%d %d %d %d", &dg, &dc, &dr, &dp2);
+        }
+        fclose(f);
+
+        if (dg <= 0 || dc != NCHASSIS || dr != NROUTERS || dp2 <= 0) {
+            fprintf(stderr, "DFLY: ERROR: bad cfg G=%d C=%d R=%d P=%d\n",
+                    dg, dc, dr, dp2);
+            *out_tau = 0;
+            return -1;
+        }
+
+        dfly_npn = dp2;
+        dfly_ngroups = dg;
+        Nc = dg * dc * dr * dp2;
+        Nr = dg * dc * dr;
+
+        if (Nc + Nr != N) {
+            fprintf(stderr, "DFLY: ERROR: Nc(%d) + Nr(%d) = %d != N(%d)\n",
+                    Nc, Nr, Nc + Nr, N);
+            *out_tau = 0;
+            return -1;
+        }
+    } else {
+        /* Adjacency path: no longer supported — router relays require
+         * the early detection path with NP-sized rank space. */
+        fprintf(stderr, "DFLY: ERROR: adjacency path not supported "
+                "(use early detection via hostfile_bbs)\n");
         *out_tau = 0;
         return -1;
     }
 
-    fprintf(stderr, "DFLY: root=%d group=%d chassis=%d router=%d npn=%d\n",
-            root, DFLY_GROUP(root), DFLY_CHASSIS(root), DFLY_ROUTER(root), dfly_npn);
+    fprintf(stderr, "DFLY: root=%d group=%d chassis=%d router=%d npn=%d "
+            "ngroups=%d Nc=%d Nr=%d N=%d\n",
+            root, DFLY_GROUP(root), DFLY_CHASSIS(root), DFLY_ROUTER(root),
+            dfly_npn, dfly_ngroups, Nc, Nr, N);
 
     int tau = 2;
     int16_t *trees[2] = { parent_arrays, parent_arrays + N };
 
-    /* Select tree variant based on dfly_shallow flag.
-     * Shallow (depth≈9): better for small messages (low startup latency).
-     * Deep    (depth≈53): better for large messages (higher pipeline BW). */
     dfly_build_hierarchical_trees(trees[0], trees[1], root, N,
                                    dfly_use_shallow ? 1 : 0);
 
-    dfly_print_stats(trees, tau, root, N, td.lat);
+    dfly_print_stats(trees, tau, root, N, NULL);
     fprintf(stderr, "DFLY: tau=%d variant=%s\n", tau,
             dfly_use_shallow ? "shallow" : "deep");
 
     *out_tau = tau;
-    topo_data_free(&td);
     return 0;
 }
 
@@ -1574,6 +1490,12 @@ static int bbs_compute_trees(const char *topo_file, int root, int N,
                 return fattree_compute_trees(topo_file, root, N,
                                              NULL, NULL, 0, NULL, 0, 0,
                                              parent_arrays, out_tau);
+            }
+            if (dlen == 9 && memcmp(dir_start, "Dragonfly", 9) == 0) {
+                fprintf(stderr, "BBS: Dragonfly topology detected (N=%d)\n", N);
+                return dragonfly_compute_trees(topo_file, root, N,
+                                               NULL, NULL, 0, NULL, 0, 0,
+                                               parent_arrays, out_tau);
             }
         }
     }

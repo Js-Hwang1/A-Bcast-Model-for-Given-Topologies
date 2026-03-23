@@ -23,6 +23,7 @@
 #   ./sweep.sh --sizes 128,256        # specific node counts
 #   ./sweep.sh --msgs 1024,1048576    # specific message sizes
 #   ./sweep.sh --sif bcast.sif        # run smpirun inside container
+#   ./sweep.sh --generate-only       # list jobs to stdout and exit
 #   TRACE=1 ./sweep.sh               # enable Paje tracing
 #
 # Output:  JSON files in ../data/<Topo>/<algo>/N<N>_MSG<msg>_R<root>.json
@@ -53,12 +54,14 @@ ROOT_SINGLE=0
 ROOT_LO=0
 ROOT_HI=0
 CHUNKS_OVERRIDE=""
+GENERATE_ONLY=0
 
 # ---- Parse CLI ----
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -j|--jobs)    JOBS="$2"; shift 2 ;;
         --dry-run)    DRY_RUN=1; shift ;;
+        --generate-only) GENERATE_ONLY=1; shift ;;
         --algos)      IFS=',' read -ra ALGOS <<< "$2"; shift 2 ;;
         --topos)      IFS=',' read -ra TOPOS <<< "$2"; shift 2 ;;
         --sizes)      IFS=',' read -ra SIZES <<< "$2"; shift 2 ;;
@@ -198,6 +201,7 @@ for TOPO in "${TOPOS[@]}"; do
             NP=$N
             HF=$HOSTFILE
             ROOT_ARG="all"
+            ROOT_SUFFIX=""
             if [[ "$ALGO" == "bbs" && "$TOPO" == "FatTree" ]]; then
                 CFG_FILE="$TOPO_DIR/$TOPO/topo_${N}.cfg"
                 if [[ -f "$CFG_FILE" ]]; then
@@ -208,7 +212,19 @@ for TOPO in "${TOPOS[@]}"; do
                         NP=$((N + NL + NS))    # Nc + Nl + 2*(Nl-1)
                         HF="$TOPO_DIR/$TOPO/hostfile_bbs_$N"
                         ROOT_ARG="all:$N"      # limit roots to compute nodes
+                        ROOT_SUFFIX=":$N"
                     fi
+                fi
+            fi
+            if [[ "$ALGO" == "bbs" && "$TOPO" == "Dragonfly" ]]; then
+                CFG_FILE="$TOPO_DIR/$TOPO/topo_${N}.cfg"
+                if [[ -f "$CFG_FILE" ]]; then
+                    read -r _ DG DC DR DP <<< "$(cat "$CFG_FILE")"
+                    NR=$((DG * DC * DR))
+                    NP=$((N + NR))
+                    HF="$TOPO_DIR/$TOPO/hostfile_bbs_$N"
+                    ROOT_ARG="all:$N"
+                    ROOT_SUFFIX=":$N"
                 fi
             fi
 
@@ -219,6 +235,7 @@ for TOPO in "${TOPOS[@]}"; do
                     # Bulk mode: single smpirun with root=all
                     # Much faster — one MPI_Init for all roots
                     OUTJSON="$DATA_DIR/$TOPO/$ALGO/N${N}_MSG${MSG}.json"
+                    [[ -f "$OUTJSON" ]] && continue
                     OUTDIR=$(dirname "$OUTJSON")
 
                     CMD="mkdir -p $OUTDIR"
@@ -243,6 +260,7 @@ for TOPO in "${TOPOS[@]}"; do
                     ROOTS=$(root_range "$N")
                     for ROOT in $ROOTS; do
                         OUTJSON="$DATA_DIR/$TOPO/$ALGO/N${N}_MSG${MSG}_R${ROOT}.json"
+                        [[ -f "$OUTJSON" ]] && continue
                         OUTDIR=$(dirname "$OUTJSON")
 
                         CMD="mkdir -p $OUTDIR"
@@ -262,7 +280,7 @@ for TOPO in "${TOPOS[@]}"; do
                             CMD+=" --cfg=tracing/smpi/internals:yes"
                         fi
 
-                        CMD+=" $BINARY $ALGO $MSG $NC $ROOT $OUTJSON"
+                        CMD+=" $BINARY $ALGO $MSG $NC ${ROOT}${ROOT_SUFFIX} $OUTJSON"
                         if [[ "$ALGO" == "test" || "$ALGO" == "ffgb" || "$ALGO" == "obfs" || "$ALGO" == "bbs" ]]; then
                             CMD+=" $(topo_data_path "$TOPO" "$N")"
                         elif [[ "$ALGO" == "glf" ]]; then
@@ -280,6 +298,12 @@ done
 
 # ---- Job log name (unique per root mode) ----
 JOBLOG="$DATA_DIR/sweep_${ROOT_MODE}.log"
+
+# ---- Generate-only mode: output job commands to stdout and exit ----
+if [[ $GENERATE_ONLY -eq 1 ]]; then
+    cat "$JOBFILE"
+    exit 0
+fi
 
 # ---- Print summary ----
 echo "=============================================="

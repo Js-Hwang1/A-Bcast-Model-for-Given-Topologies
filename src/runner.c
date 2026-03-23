@@ -2742,6 +2742,8 @@ int main(int argc, char **argv)
             }
         } else {
             root = atoi(argv[4]);
+            const char *colon = strchr(argv[4], ':');
+            if (colon) max_compute_rank = atoi(colon + 1);
         }
     }
 
@@ -3135,7 +3137,7 @@ int main(int argc, char **argv)
             }
         } else {
             printf("algorithm : %s\n", algo);
-            printf("nodes     : %d\n", size);
+            printf("nodes     : %d\n", max_compute_rank > 0 ? max_compute_rank : size);
             printf("msg_bytes : %d\n", nbytes);
             printf("nchunks   : %d\n", reported_nchunks);
             printf("root      : %d\n", root);
@@ -3156,7 +3158,8 @@ int main(int argc, char **argv)
                         "  \"time_sec\": %.9f,\n"
                         "  \"correct\": %s\n"
                         "}\n",
-                        algo, size, nbytes, reported_nchunks, root,
+                        algo, max_compute_rank > 0 ? max_compute_rank : size,
+                        nbytes, reported_nchunks, root,
                         times[0],
                         oks[0] ? "true" : "false");
                     fclose(jfp);
