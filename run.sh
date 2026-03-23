@@ -1,45 +1,69 @@
 #!/usr/bin/env bash
 #
-# run.sh — Compile and run broadcast experiments locally (no SLURM).
-#
-# Hard-coded config below. Edit the arrays to choose what to run.
-# Handles BBS special cases (extra ranks for FatTree/Dragonfly).
+# run.sh — Compile and run broadcast experiments (Docker/Singularity/native).
 #
 # Usage:
-#   chmod +x run.sh && ./run.sh
-#   ./run.sh --dry-run        # show commands without executing
-#   ./run.sh --jobs 8         # limit parallelism
+#   ./run.sh <algo> <topo> <N> <msg_bytes>     # single experiment, all roots
+#   ./run.sh bbs Dragonfly 128 65536            # example
+#   ./run.sh mpi Butterfly 256 1048576          # example
+#   ./run.sh all                                # run everything
+#   ./run.sh --dry-run bbs Dragonfly 128 65536  # show command only
 #
 
 set -euo pipefail
 
 # ============================================================
-#  CONFIGURATION — edit these
-# ============================================================
-TOPOS=(Butterfly Dragonfly FatTree 2Dmesh)
-SIZES=(128 256 512 1024)
-ALGOS=(mpi srda pipe bine bbs)
-MSG_SIZES=(65536 262144 1048576 4194304 16777216 67108864 134217728)
-HOST_SPEED="2000Gf"
-
-# ============================================================
 #  OPTIONS
 # ============================================================
-JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 DRY_RUN=0
+HOST_SPEED="2000Gf"
 DOCKER_IMG="bcast"
 
+# Parse flags (before positional args)
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run)  DRY_RUN=1; shift ;;
-        --jobs|-j)  JOBS="$2"; shift 2 ;;
         -h|--help)
-            echo "Usage: $0 [--dry-run] [--jobs N]"
-            echo "Edit the TOPOS/SIZES/ALGOS/MSG_SIZES arrays at the top of this script."
+            echo "Usage: $0 [--dry-run] <algo> <topo> <N> <msg_bytes>"
+            echo "       $0 [--dry-run] all"
+            echo ""
+            echo "Arguments:"
+            echo "  algo       : mpi, srda, pipe, bine, bbs, glf, obfs, ffgb, test"
+            echo "  topo       : Butterfly, Dragonfly, FatTree, 2Dmesh"
+            echo "  N          : 128, 256, 512, 1024"
+            echo "  msg_bytes  : e.g. 65536, 1048576, 67108864"
+            echo ""
+            echo "Examples:"
+            echo "  $0 bbs Dragonfly 128 65536"
+            echo "  $0 mpi Butterfly 256 1048576"
+            echo "  $0 all                          # run all combos"
+            echo "  $0 --dry-run bbs FatTree 512 4194304"
             exit 0 ;;
-        *) echo "Unknown flag: $1" >&2; exit 1 ;;
+        -*) echo "Unknown flag: $1" >&2; exit 1 ;;
+        *)  break ;;
     esac
 done
+
+# Parse positional args
+if [[ $# -eq 0 ]]; then
+    echo "Usage: $0 [--dry-run] <algo> <topo> <N> <msg_bytes>" >&2
+    echo "       $0 [--dry-run] all" >&2
+    exit 1
+elif [[ $# -eq 1 && "$1" == "all" ]]; then
+    ALGOS=(mpi srda pipe bine bbs)
+    TOPOS=(Butterfly Dragonfly FatTree 2Dmesh)
+    SIZES=(128 256 512 1024)
+    MSG_SIZES=(65536 262144 1048576 4194304 16777216 67108864 134217728)
+elif [[ $# -eq 4 ]]; then
+    ALGOS=("$1")
+    TOPOS=("$2")
+    SIZES=("$3")
+    MSG_SIZES=("$4")
+else
+    echo "ERROR: expected 4 arguments: <algo> <topo> <N> <msg_bytes>" >&2
+    echo "       or: all" >&2
+    exit 1
+fi
 
 # ============================================================
 #  PATHS
@@ -52,12 +76,11 @@ BIN="$PROJ_DIR/bin/runner"
 # ============================================================
 #  CONTAINER DETECTION: Docker > Singularity > native
 # ============================================================
-RUNTIME=""      # docker | singularity | native
+RUNTIME=""
 SMPI_PREFIX=""
 DOCKER_RUN=""
 
 if command -v docker &>/dev/null; then
-    # Build Docker image if not present
     if ! docker image inspect "$DOCKER_IMG" &>/dev/null; then
         echo "=== Building Docker image '$DOCKER_IMG' ==="
         docker build -t "$DOCKER_IMG" "$PROJ_DIR"
@@ -109,6 +132,8 @@ choose_chunks() {
     local nc=$(( $1 / 8192 )); (( nc < 4 )) && nc=4; echo "$nc"
 }
 
+relpath() { echo "${1#$PROJ_DIR/}"; }
+
 # ============================================================
 #  BUILD
 # ============================================================
@@ -124,7 +149,7 @@ fi
 echo "  Built: $BIN"
 
 # ============================================================
-#  PREPROCESS .tdat FILES
+#  PREPROCESS .tdat FILES (only for algos that need them)
 # ============================================================
 needs_tdat=0
 for a in "${ALGOS[@]}"; do
@@ -141,7 +166,7 @@ if [[ $needs_tdat -eq 1 ]]; then
             if [[ ! -f "$tdat" || "$xml" -nt "$tdat" ]]; then
                 echo "  $xml -> $tdat"
                 if [[ "$RUNTIME" == "docker" ]]; then
-                    $DOCKER_RUN python3 src/topo_preprocess.py "${xml#$PROJ_DIR/}" "${tdat#$PROJ_DIR/}"
+                    $DOCKER_RUN python3 src/topo_preprocess.py "$(relpath "$xml")" "$(relpath "$tdat")"
                 elif [[ "$RUNTIME" == "singularity" ]]; then
                     singularity exec --bind "$PROJ_DIR" "$PROJ_DIR/bcast.sif" python3 "$PREPROCESS" "$xml" "$tdat"
                 else
@@ -161,12 +186,8 @@ echo "  Broadcast Experiments"
 echo "  Topologies : ${TOPOS[*]}"
 echo "  Sizes      : ${SIZES[*]}"
 echo "  Algorithms : ${ALGOS[*]}"
-echo "  Msg sizes  : ${#MSG_SIZES[@]}"
-echo "  Workers    : $JOBS"
+echo "  Msg sizes  : ${MSG_SIZES[*]}"
 echo "=============================================="
-
-# Helper: convert absolute path to relative (for Docker container /workspace mount)
-relpath() { echo "${1#$PROJ_DIR/}"; }
 
 for TOPO in "${TOPOS[@]}"; do
     for N in "${SIZES[@]}"; do
@@ -175,7 +196,6 @@ for TOPO in "${TOPOS[@]}"; do
         [[ ! -f "$PLAT" || ! -f "$HF" ]] && continue
 
         for ALGO in "${ALGOS[@]}"; do
-            # --- Compute NP, hostfile, root suffix for BBS special topologies ---
             NP=$N
             ROOT_SUFFIX=""
             TOPO_ARG=""
@@ -212,13 +232,6 @@ for TOPO in "${TOPOS[@]}"; do
             fi
 
             for MSG in "${MSG_SIZES[@]}"; do
-                # Skip known OOM cases
-                MEM_EST=$(( NP * MSG / 1048576 ))
-                if (( MEM_EST > 120000 )); then
-                    echo "SKIP $ALGO $TOPO N=$N MSG=$MSG (est ${MEM_EST}MB > 120GB)"
-                    continue
-                fi
-
                 NC=$(choose_chunks "$MSG")
                 OUTDIR="$DATA_DIR/$TOPO/$ALGO"
                 BULK="$OUTDIR/N${N}_MSG${MSG}.json"

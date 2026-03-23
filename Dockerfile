@@ -11,9 +11,11 @@ RUN apt-get update && apt-get install -y \
         git \
         wget \
         python3 \
+        python3-pip \
         python3-dev \
         libboost-all-dev \
         parallel \
+    && pip3 install --no-cache-dir numpy \
     && rm -rf /var/lib/apt/lists/*
 
 # Build SimGrid v3.35 from source (includes smpicc, smpirun)
