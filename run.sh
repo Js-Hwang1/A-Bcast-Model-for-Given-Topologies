@@ -27,7 +27,7 @@ HOST_SPEED="2000Gf"
 # ============================================================
 JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 DRY_RUN=0
-SIF=""    # set to container path if using singularity, e.g. SIF="bcast.sif"
+SIF="bcast.sif"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
