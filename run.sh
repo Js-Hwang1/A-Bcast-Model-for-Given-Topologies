@@ -27,15 +27,14 @@ HOST_SPEED="2000Gf"
 # ============================================================
 JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 DRY_RUN=0
-SIF="bcast.sif"
+DOCKER_IMG="bcast"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run)  DRY_RUN=1; shift ;;
         --jobs|-j)  JOBS="$2"; shift 2 ;;
-        --sif)      SIF="$2"; shift 2 ;;
         -h|--help)
-            echo "Usage: $0 [--dry-run] [--jobs N] [--sif container.sif]"
+            echo "Usage: $0 [--dry-run] [--jobs N]"
             echo "Edit the TOPOS/SIZES/ALGOS/MSG_SIZES arrays at the top of this script."
             exit 0 ;;
         *) echo "Unknown flag: $1" >&2; exit 1 ;;
@@ -50,10 +49,34 @@ TOPO_DIR="$PROJ_DIR/topo"
 DATA_DIR="$PROJ_DIR/data"
 BIN="$PROJ_DIR/bin/runner"
 
+# ============================================================
+#  CONTAINER DETECTION: Docker > Singularity > native
+# ============================================================
+RUNTIME=""      # docker | singularity | native
 SMPI_PREFIX=""
-if [[ -n "$SIF" ]]; then
-    [[ ! -f "$SIF" ]] && { echo "ERROR: SIF not found: $SIF" >&2; exit 1; }
-    SMPI_PREFIX="singularity exec --bind $PROJ_DIR $SIF"
+DOCKER_RUN=""
+
+if command -v docker &>/dev/null; then
+    # Build Docker image if not present
+    if ! docker image inspect "$DOCKER_IMG" &>/dev/null; then
+        echo "=== Building Docker image '$DOCKER_IMG' ==="
+        docker build -t "$DOCKER_IMG" "$PROJ_DIR"
+    fi
+    RUNTIME="docker"
+    DOCKER_RUN="docker run --rm -v $PROJ_DIR:/workspace -w /workspace $DOCKER_IMG"
+    SMPI_PREFIX="$DOCKER_RUN"
+    echo "Using: Docker ($DOCKER_IMG)"
+elif command -v singularity &>/dev/null && [[ -f "$PROJ_DIR/bcast.sif" ]]; then
+    RUNTIME="singularity"
+    SMPI_PREFIX="singularity exec --bind $PROJ_DIR $PROJ_DIR/bcast.sif"
+    echo "Using: Singularity (bcast.sif)"
+elif command -v smpirun &>/dev/null; then
+    RUNTIME="native"
+    echo "Using: native smpirun"
+else
+    echo "ERROR: No container runtime (docker/singularity) or native smpirun found." >&2
+    echo "Install Docker and run: docker build -t bcast ." >&2
+    exit 1
 fi
 
 # ============================================================
@@ -91,7 +114,9 @@ choose_chunks() {
 # ============================================================
 echo "=== Building runner ==="
 mkdir -p "$(dirname "$BIN")"
-if [[ -n "$SMPI_PREFIX" ]]; then
+if [[ "$RUNTIME" == "docker" ]]; then
+    $DOCKER_RUN smpicc -O2 -Wall -Wextra -o bin/runner src/runner.c -lm
+elif [[ "$RUNTIME" == "singularity" ]]; then
     $SMPI_PREFIX smpicc -O2 -Wall -Wextra -o "$BIN" "$PROJ_DIR/src/runner.c" -lm
 else
     make -C "$PROJ_DIR/src" -s
@@ -115,8 +140,10 @@ if [[ $needs_tdat -eq 1 ]]; then
             [[ ! -f "$xml" ]] && continue
             if [[ ! -f "$tdat" || "$xml" -nt "$tdat" ]]; then
                 echo "  $xml -> $tdat"
-                if [[ -n "$SMPI_PREFIX" ]]; then
-                    singularity exec --bind "$PROJ_DIR" "$SIF" python3 "$PREPROCESS" "$xml" "$tdat"
+                if [[ "$RUNTIME" == "docker" ]]; then
+                    $DOCKER_RUN python3 src/topo_preprocess.py "${xml#$PROJ_DIR/}" "${tdat#$PROJ_DIR/}"
+                elif [[ "$RUNTIME" == "singularity" ]]; then
+                    singularity exec --bind "$PROJ_DIR" "$PROJ_DIR/bcast.sif" python3 "$PREPROCESS" "$xml" "$tdat"
                 else
                     python3 "$PREPROCESS" "$xml" "$tdat"
                 fi
@@ -138,7 +165,8 @@ echo "  Msg sizes  : ${#MSG_SIZES[@]}"
 echo "  Workers    : $JOBS"
 echo "=============================================="
 
-SMPI_RUN="$SMPI_PREFIX smpirun"
+# Helper: convert absolute path to relative (for Docker container /workspace mount)
+relpath() { echo "${1#$PROJ_DIR/}"; }
 
 for TOPO in "${TOPOS[@]}"; do
     for N in "${SIZES[@]}"; do
@@ -201,13 +229,24 @@ for TOPO in "${TOPOS[@]}"; do
                 echo ""
                 echo "--- $ALGO $TOPO N=$N MSG=$MSG NC=$NC NP=$NP ---"
 
-                CMD="$SMPI_RUN -np $NP -platform $PLAT -hostfile $HF"
-                CMD+=" --cfg=smpi/host-speed:$HOST_SPEED"
-                CMD+=" --cfg=smpi/simulate-computation:no"
-                CMD+=" --cfg=smpi/display-timing:yes"
-                CMD+=" --log=root.thres:warning"
-                CMD+=" $BIN $ALGO $MSG $NC all${ROOT_SUFFIX} $BULK"
-                [[ -n "$TOPO_ARG" ]] && CMD+=" $TOPO_ARG"
+                if [[ "$RUNTIME" == "docker" ]]; then
+                    CMD="$DOCKER_RUN smpirun -np $NP"
+                    CMD+=" -platform $(relpath "$PLAT") -hostfile $(relpath "$HF")"
+                    CMD+=" --cfg=smpi/host-speed:$HOST_SPEED"
+                    CMD+=" --cfg=smpi/simulate-computation:no"
+                    CMD+=" --cfg=smpi/display-timing:yes"
+                    CMD+=" --log=root.thres:warning"
+                    CMD+=" bin/runner $ALGO $MSG $NC all${ROOT_SUFFIX} $(relpath "$BULK")"
+                    [[ -n "$TOPO_ARG" ]] && CMD+=" $(relpath "$TOPO_ARG")"
+                else
+                    CMD="$SMPI_PREFIX smpirun -np $NP -platform $PLAT -hostfile $HF"
+                    CMD+=" --cfg=smpi/host-speed:$HOST_SPEED"
+                    CMD+=" --cfg=smpi/simulate-computation:no"
+                    CMD+=" --cfg=smpi/display-timing:yes"
+                    CMD+=" --log=root.thres:warning"
+                    CMD+=" $BIN $ALGO $MSG $NC all${ROOT_SUFFIX} $BULK"
+                    [[ -n "$TOPO_ARG" ]] && CMD+=" $TOPO_ARG"
+                fi
 
                 if [[ $DRY_RUN -eq 1 ]]; then
                     echo "  $CMD"
