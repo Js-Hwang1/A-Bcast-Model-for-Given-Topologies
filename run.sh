@@ -3,11 +3,12 @@
 # run.sh — Compile and run broadcast experiments (Docker/Singularity/native).
 #
 # Usage:
-#   ./run.sh <algo> <topo> <N> <msg_bytes>     # single experiment, all roots
-#   ./run.sh bbs Dragonfly 128 65536            # example
-#   ./run.sh mpi Butterfly 256 1048576          # example
-#   ./run.sh all                                # run everything
-#   ./run.sh --dry-run bbs Dragonfly 128 65536  # show command only
+#   ./run.sh <algo> <topo> <N> <msg_bytes> [root]   # root omitted = all roots
+#   ./run.sh bbs Dragonfly 128 65536                 # sweep all roots
+#   ./run.sh bbs Dragonfly 128 65536 0               # single root=0
+#   ./run.sh mpi Butterfly 256 1048576 5             # single root=5
+#   ./run.sh all                                     # run everything
+#   ./run.sh --dry-run bbs Dragonfly 128 65536       # show command only
 #
 
 set -euo pipefail
@@ -24,7 +25,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run)  DRY_RUN=1; shift ;;
         -h|--help)
-            echo "Usage: $0 [--dry-run] <algo> <topo> <N> <msg_bytes>"
+            echo "Usage: $0 [--dry-run] <algo> <topo> <N> <msg_bytes> [root]"
             echo "       $0 [--dry-run] all"
             echo ""
             echo "Arguments:"
@@ -32,12 +33,16 @@ while [[ $# -gt 0 ]]; do
             echo "  topo       : Butterfly, Dragonfly, FatTree, 2Dmesh"
             echo "  N          : 128, 256, 512, 1024"
             echo "  msg_bytes  : e.g. 65536, 1048576, 67108864"
+            echo "  root       : root rank (omit to sweep all roots)"
             echo ""
             echo "Examples:"
-            echo "  $0 bbs Dragonfly 128 65536"
+            echo "  $0 bbs Dragonfly 128 65536        # all roots"
+            echo "  $0 bbs Dragonfly 128 65536 0      # root=0 only"
             echo "  $0 mpi Butterfly 256 1048576"
-            echo "  $0 all                          # run all combos"
+            echo "  $0 all                            # run all combos"
             echo "  $0 --dry-run bbs FatTree 512 4194304"
+            echo ""
+            echo "Output: results written to project root as <algo>_<topo>_N<N>_MSG<msg>[_R<root>].json"
             exit 0 ;;
         -*) echo "Unknown flag: $1" >&2; exit 1 ;;
         *)  break ;;
@@ -45,8 +50,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Parse positional args
+ROOT_ARG=""
 if [[ $# -eq 0 ]]; then
-    echo "Usage: $0 [--dry-run] <algo> <topo> <N> <msg_bytes>" >&2
+    echo "Usage: $0 [--dry-run] <algo> <topo> <N> <msg_bytes> [root]" >&2
     echo "       $0 [--dry-run] all" >&2
     exit 1
 elif [[ $# -eq 1 && "$1" == "all" ]]; then
@@ -59,8 +65,14 @@ elif [[ $# -eq 4 ]]; then
     TOPOS=("$2")
     SIZES=("$3")
     MSG_SIZES=("$4")
+elif [[ $# -eq 5 ]]; then
+    ALGOS=("$1")
+    TOPOS=("$2")
+    SIZES=("$3")
+    MSG_SIZES=("$4")
+    ROOT_ARG="$5"
 else
-    echo "ERROR: expected 4 arguments: <algo> <topo> <N> <msg_bytes>" >&2
+    echo "ERROR: expected 4-5 arguments: <algo> <topo> <N> <msg_bytes> [root]" >&2
     echo "       or: all" >&2
     exit 1
 fi
@@ -70,7 +82,6 @@ fi
 # ============================================================
 PROJ_DIR="$(cd "$(dirname "$0")" && pwd)"
 TOPO_DIR="$PROJ_DIR/topo"
-DATA_DIR="$PROJ_DIR/data"
 BIN="$PROJ_DIR/bin/runner"
 
 # ============================================================
@@ -80,7 +91,7 @@ RUNTIME=""
 SMPI_PREFIX=""
 DOCKER_RUN=""
 
-if command -v docker &>/dev/null; then
+if command -v docker &>/dev/null && docker info &>/dev/null; then
     if ! docker image inspect "$DOCKER_IMG" &>/dev/null; then
         echo "=== Building Docker image '$DOCKER_IMG' ==="
         docker build -t "$DOCKER_IMG" "$PROJ_DIR"
@@ -135,14 +146,14 @@ choose_chunks() {
 relpath() { echo "${1#$PROJ_DIR/}"; }
 
 # ============================================================
-#  BUILD
+#  BUILD (suppress warnings)
 # ============================================================
 echo "=== Building runner ==="
 mkdir -p "$(dirname "$BIN")"
 if [[ "$RUNTIME" == "docker" ]]; then
-    $DOCKER_RUN smpicc -O2 -Wall -Wextra -o bin/runner src/runner.c -lm
+    $DOCKER_RUN smpicc -O2 -w -o bin/runner src/runner.c -lm
 elif [[ "$RUNTIME" == "singularity" ]]; then
-    $SMPI_PREFIX smpicc -O2 -Wall -Wextra -o "$BIN" "$PROJ_DIR/src/runner.c" -lm
+    $SMPI_PREFIX smpicc -O2 -w -o "$BIN" "$PROJ_DIR/src/runner.c" -lm
 else
     make -C "$PROJ_DIR/src" -s
 fi
@@ -187,6 +198,7 @@ echo "  Topologies : ${TOPOS[*]}"
 echo "  Sizes      : ${SIZES[*]}"
 echo "  Algorithms : ${ALGOS[*]}"
 echo "  Msg sizes  : ${MSG_SIZES[*]}"
+[[ -n "$ROOT_ARG" ]] && echo "  Root       : $ROOT_ARG" || echo "  Root       : all (sweep)"
 echo "=============================================="
 
 for TOPO in "${TOPOS[@]}"; do
@@ -233,14 +245,18 @@ for TOPO in "${TOPOS[@]}"; do
 
             for MSG in "${MSG_SIZES[@]}"; do
                 NC=$(choose_chunks "$MSG")
-                OUTDIR="$DATA_DIR/$TOPO/$ALGO"
-                BULK="$OUTDIR/N${N}_MSG${MSG}.json"
-                mkdir -p "$OUTDIR"
 
-                [[ -f "$BULK" ]] && { echo "SKIP $ALGO $TOPO N=$N MSG=$MSG (exists)"; continue; }
+                # Determine root arg for runner
+                if [[ -n "$ROOT_ARG" ]]; then
+                    RUNNER_ROOT="${ROOT_ARG}${ROOT_SUFFIX}"
+                    OUTFILE="$PROJ_DIR/${ALGO}_${TOPO}_N${N}_MSG${MSG}_R${ROOT_ARG}.json"
+                else
+                    RUNNER_ROOT="all${ROOT_SUFFIX}"
+                    OUTFILE="$PROJ_DIR/${ALGO}_${TOPO}_N${N}_MSG${MSG}.json"
+                fi
 
                 echo ""
-                echo "--- $ALGO $TOPO N=$N MSG=$MSG NC=$NC NP=$NP ---"
+                echo "--- $ALGO $TOPO N=$N MSG=$MSG NC=$NC NP=$NP root=${ROOT_ARG:-all} ---"
 
                 if [[ "$RUNTIME" == "docker" ]]; then
                     CMD="$DOCKER_RUN smpirun -np $NP"
@@ -249,7 +265,7 @@ for TOPO in "${TOPOS[@]}"; do
                     CMD+=" --cfg=smpi/simulate-computation:no"
                     CMD+=" --cfg=smpi/display-timing:yes"
                     CMD+=" --log=root.thres:warning"
-                    CMD+=" bin/runner $ALGO $MSG $NC all${ROOT_SUFFIX} $(relpath "$BULK")"
+                    CMD+=" bin/runner $ALGO $MSG $NC $RUNNER_ROOT $(relpath "$OUTFILE")"
                     [[ -n "$TOPO_ARG" ]] && CMD+=" $(relpath "$TOPO_ARG")"
                 else
                     CMD="$SMPI_PREFIX smpirun -np $NP -platform $PLAT -hostfile $HF"
@@ -257,7 +273,7 @@ for TOPO in "${TOPOS[@]}"; do
                     CMD+=" --cfg=smpi/simulate-computation:no"
                     CMD+=" --cfg=smpi/display-timing:yes"
                     CMD+=" --log=root.thres:warning"
-                    CMD+=" $BIN $ALGO $MSG $NC all${ROOT_SUFFIX} $BULK"
+                    CMD+=" $BIN $ALGO $MSG $NC $RUNNER_ROOT $OUTFILE"
                     [[ -n "$TOPO_ARG" ]] && CMD+=" $TOPO_ARG"
                 fi
 
