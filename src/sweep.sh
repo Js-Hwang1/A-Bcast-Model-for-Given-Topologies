@@ -244,6 +244,8 @@ for TOPO in "${TOPOS[@]}"; do
                     CMD+=" -hostfile $HF"
                     CMD+=" --cfg=smpi/host-speed:$HOST_SPEED"
                     CMD+=" --cfg=smpi/simulate-computation:no"
+                    CMD+=" --cfg=smpi/shared-malloc-blocksize:$MSG"
+                    CMD+=" --cfg=contexts/stack-size:4096"
                     CMD+=" --cfg=smpi/display-timing:yes"
                     CMD+=" --log=root.thres:warning"
                     CMD+=" $BINARY $ALGO $MSG $NC $ROOT_ARG $OUTJSON"
@@ -285,6 +287,8 @@ for TOPO in "${TOPOS[@]}"; do
                         CMD+=" -hostfile $HF"
                         CMD+=" --cfg=smpi/host-speed:$HOST_SPEED"
                         CMD+=" --cfg=smpi/simulate-computation:no"
+                        CMD+=" --cfg=smpi/shared-malloc-blocksize:$MSG"
+                        CMD+=" --cfg=contexts/stack-size:4096"
                         CMD+=" --cfg=smpi/display-timing:yes"
                         CMD+=" --log=root.thres:warning"
 

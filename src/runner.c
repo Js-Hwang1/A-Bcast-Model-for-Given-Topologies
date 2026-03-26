@@ -63,6 +63,8 @@
 
 /* SMPI_SHARED_MALLOC: all N simulated processes share ONE physical
  * allocation, so memory is O(msg) not O(N*msg).
+ * Requires --cfg=smpi/shared-malloc-blocksize:SIZE >= msg_bytes
+ * to avoid excessive VMA mappings.
  * smpicc's mpi.h already defines this; fall back to malloc otherwise. */
 #ifndef SMPI_SHARED_MALLOC
 #  define SMPI_SHARED_MALLOC(sz)  malloc(sz)
@@ -71,7 +73,7 @@
 
 /* Single shared simulation buffer — allocated once, reused by all N
  * SimGrid coroutines (they share one OS address space).
- * Physical: O(msg), not O(N*msg).  No folded VMAs, no OOM. */
+ * Physical: O(msg), not O(N*msg). */
 static char  *_sim_buf       = NULL;
 static size_t _sim_buf_bytes = 0;
 
@@ -2331,14 +2333,6 @@ static double run_test(void *buf, int count, int rank, int size,
         topo_data_free(&td);
         return -1.0;
     }
-    if (td.num_ev <= 0) {
-        if (rank == 0)
-            fprintf(stderr,
-                "Error: .tdat has no spectral data (need v2 format)\n");
-        topo_data_free(&td);
-        return -1.0;
-    }
-
     /* 0. Hybrid srda for small-medium messages.
      *    srda's scatter+recursive-doubling-allgather uses all links
      *    and MPI collectives, beating tree broadcast at small sizes.
@@ -2876,8 +2870,8 @@ int main(int argc, char **argv)
 
         /* 3. Run missing roots */
         if ((size_t)nbytes > _sim_buf_bytes) {
-            free(_sim_buf);
-            _sim_buf = malloc(nbytes);
+            SMPI_SHARED_FREE(_sim_buf);
+            _sim_buf = SMPI_SHARED_MALLOC(nbytes);
             _sim_buf_bytes = (size_t)nbytes;
         }
         char *buf = _sim_buf;
@@ -3067,8 +3061,8 @@ int main(int argc, char **argv)
     double *times = calloc(nroots, sizeof(double));
     int    *oks   = calloc(nroots, sizeof(int));
     if ((size_t)nbytes > _sim_buf_bytes) {
-        free(_sim_buf);
-        _sim_buf = malloc(nbytes);
+        SMPI_SHARED_FREE(_sim_buf);
+        _sim_buf = SMPI_SHARED_MALLOC(nbytes);
         _sim_buf_bytes = (size_t)nbytes;
     }
     char *buf = _sim_buf;

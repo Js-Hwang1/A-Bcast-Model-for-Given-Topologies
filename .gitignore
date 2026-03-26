@@ -17,6 +17,5 @@ __pycache__/
 *.png
 simgrid/
 data/
-figs/
 seawulf/
 encodings/
