@@ -3,7 +3,6 @@ paper.tex
 .claude
 .DS_Store
 *.pdf
-data/
 .env
 bcast.def
 *.tex
@@ -16,6 +15,5 @@ __pycache__/
 *.out
 *.png
 simgrid/
-data/
 seawulf/
 encodings/
