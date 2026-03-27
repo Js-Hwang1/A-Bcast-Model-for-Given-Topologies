@@ -258,27 +258,29 @@ for TOPO in "${TOPOS[@]}"; do
                     echo "$CMD" >> "$JOBFILE"
                     NJOBS=$((NJOBS + 1))
                 else
-                    # Per-root mode: batch roots into JOBS batches
+                    # Per-root mode: collect missing roots, then batch evenly
                     ROOTS_ARR=($(root_range "$N"))
                     TOTAL_ROOTS=${#ROOTS_ARR[@]}
-                    BATCH_SZ=$(( (TOTAL_ROOTS + JOBS - 1) / JOBS ))
+                    OUTBASE="$DATA_DIR/$TOPO/$ALGO/N${N}_MSG${MSG}"
+
+                    # 1) Collect only roots whose JSON is missing
+                    MISSING=()
+                    for ((ri=0; ri<TOTAL_ROOTS; ri++)); do
+                        RR=${ROOTS_ARR[$ri]}
+                        [[ ! -f "${OUTBASE}_R${RR}.json" ]] && MISSING+=("$RR")
+                    done
+                    NMISSING=${#MISSING[@]}
+                    (( NMISSING == 0 )) && continue
+
+                    # 2) Batch missing roots evenly across JOBS workers
+                    BATCH_SZ=$(( (NMISSING + JOBS - 1) / JOBS ))
                     (( BATCH_SZ < 1 )) && BATCH_SZ=1
 
-                    for ((bi=0; bi<TOTAL_ROOTS; bi+=BATCH_SZ)); do
-                        BLO=${ROOTS_ARR[$bi]}
+                    for ((bi=0; bi<NMISSING; bi+=BATCH_SZ)); do
                         BHI_IDX=$((bi + BATCH_SZ - 1))
-                        (( BHI_IDX >= TOTAL_ROOTS )) && BHI_IDX=$((TOTAL_ROOTS - 1))
-                        BHI=${ROOTS_ARR[$BHI_IDX]}
-
-                        OUTBASE="$DATA_DIR/$TOPO/$ALGO/N${N}_MSG${MSG}"
-
-                        # Skip if all per-root JSONs in this batch already exist
-                        ALL_EXIST=1
-                        for ((ri=bi; ri<=BHI_IDX; ri++)); do
-                            RR=${ROOTS_ARR[$ri]}
-                            [[ ! -f "${OUTBASE}_R${RR}.json" ]] && ALL_EXIST=0 && break
-                        done
-                        (( ALL_EXIST == 1 )) && continue
+                        (( BHI_IDX >= NMISSING )) && BHI_IDX=$((NMISSING - 1))
+                        BLO=${MISSING[$bi]}
+                        BHI=${MISSING[$BHI_IDX]}
 
                         OUTDIR=$(dirname "$OUTBASE")
                         CMD="mkdir -p $OUTDIR"
