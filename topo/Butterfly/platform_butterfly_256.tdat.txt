@@ -35,34 +35,3 @@ First-link contention from node-0:
   link ID    2:    1 destinations
   Max contention group = 128
   Num distinct first-links = 8
-
-Spectral analysis (8 eigenvectors):
-  Eigenvalues (λ₂..λ_9):
-    λ_2   = 6.375000e+01
-    λ_3   = 6.375000e+01
-    λ_4   = 6.375000e+01
-    λ_5   = 6.375000e+01
-    λ_6   = 6.375000e+01
-    λ_7   = 6.375000e+01
-    λ_8   = 6.375000e+01
-    λ_9   = 6.375000e+01
-  Spectral gap ratio (λ₃/λ₂) = 1.0000
-    (small → sharp communities, large → uniform/flat)
-
-  Fiedler vector (v₂) sample (first 16 nodes):
-    node-0   : -0.000000
-    node-1   : +0.070543
-    node-2   : -0.002179
-    node-3   : +0.068364
-    node-4   : +0.035511
-    node-5   : +0.106054
-    node-6   : +0.033332
-    node-7   : +0.103875
-    node-8   : -0.062815
-    node-9   : +0.007728
-    node-10  : -0.064994
-    node-11  : +0.005549
-    node-12  : -0.027304
-    node-13  : +0.043239
-    node-14  : -0.029483
-    node-15  : +0.041060

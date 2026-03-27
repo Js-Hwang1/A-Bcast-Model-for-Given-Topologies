@@ -1,9 +1,0 @@
-{
-  "algorithm": "bbs",
-  "nodes": 128,
-  "msg_bytes": 65536,
-  "nchunks": 8,
-  "root": 0,
-  "time_sec": 0.000094005,
-  "correct": true
-}

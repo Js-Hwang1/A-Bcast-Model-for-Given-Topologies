@@ -1004,11 +1004,21 @@ static void binomial_bcast_subset(void *buf, int count, int rank,
 static double run_glf(void *buf, int count, int rank, int size,
                       int root, const char *topo_file)
 {
+    /* Derive .cfg path from .tdat directory: {dir}/topo_{size}.cfg */
+    char cfg_path[4096];
+    const char *last_slash = strrchr(topo_file, '/');
+    if (last_slash) {
+        int dirlen = (int)(last_slash - topo_file);
+        snprintf(cfg_path, sizeof(cfg_path), "%.*s/topo_%d.cfg", dirlen, topo_file, size);
+    } else {
+        snprintf(cfg_path, sizeof(cfg_path), "topo_%d.cfg", size);
+    }
+
     topo_cfg_t cfg;
-    if (parse_topo_cfg(topo_file, &cfg) != 0) {
+    if (parse_topo_cfg(cfg_path, &cfg) != 0) {
         if (rank == 0)
             fprintf(stderr, "Error: cannot parse topo config: %s\n",
-                    topo_file);
+                    cfg_path);
         return -1.0;
     }
 
