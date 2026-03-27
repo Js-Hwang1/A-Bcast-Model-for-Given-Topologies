@@ -117,8 +117,9 @@ def load_data(topology, algorithm, N):
 def generate_1by4(topology, show=False):
     """Create a 1×4 figure for one topology with shared y-axis."""
 
-    # First pass: collect global y-range across all 4 sizes
+    # First pass: collect global y-range and ALL message sizes
     y_min_global, y_max_global = np.inf, -np.inf
+    all_msgs_global = set()
     for N in N_VALUES:
         for algo in ALGORITHMS:
             msg, mu = load_data(topology, algo, N)
@@ -126,6 +127,7 @@ def generate_1by4(topology, show=False):
                 continue
             y_min_global = min(y_min_global, mu.min())
             y_max_global = max(y_max_global, mu.max())
+            all_msgs_global.update(msg.tolist())
 
     if y_min_global == np.inf:
         print(f"  (no data for {topology})")
@@ -134,72 +136,164 @@ def generate_1by4(topology, show=False):
     # Pad the range a bit on log scale
     y_min_global /= 2.0
     y_max_global *= 2.0
+    global_xticks = sorted(all_msgs_global)
+    global_xlim = (global_xticks[0] / 1.5, global_xticks[-1] * 1.5)
 
-    fig, axes = plt.subplots(1, 4, figsize=(20, 4.0), sharey=True)
+    fig, axes = plt.subplots(1, 4, figsize=(20, 4.0),
+                             sharey=True, sharex=True)
 
     topo_label = TOPOLOGY_LABEL.get(topology, topology)
 
-    for col, (N, ax) in enumerate(zip(N_VALUES, axes)):
-        any_data = False
-        all_msgs = set()
+    # Set scales and limits once on the first axes (shared propagates)
+    axes[0].set_xscale("log", base=2)
+    axes[0].set_yscale("log")
+    axes[0].set_xlim(global_xlim)
+    axes[0].set_ylim(y_min_global, y_max_global)
+    axes[0].set_xticks(global_xticks)
+    axes[0].set_xticklabels([_bytes_label(int(x)) for x in global_xticks],
+                             rotation=40, ha="right", fontsize=9)
+    axes[0].xaxis.set_minor_formatter(ticker.NullFormatter())
+    axes[0].xaxis.set_minor_locator(ticker.NullLocator())
+    axes[0].yaxis.set_major_formatter(ticker.FuncFormatter(_time_label))
+    axes[0].yaxis.set_minor_formatter(ticker.NullFormatter())
 
+    for col, (N, ax) in enumerate(zip(N_VALUES, axes)):
         for algo in ALGORITHMS:
             label, color, marker, ls, ecolor = ALGO_STYLE[algo]
             msg, mu = load_data(topology, algo, N)
             if msg is None:
                 continue
-            any_data = True
-            all_msgs.update(msg.tolist())
             ax.plot(msg, mu, ls, color=color,
                     marker=marker, markersize=4.5, markeredgecolor=ecolor,
                     markeredgewidth=0.5, linewidth=1.3,
                     label=label, zorder=3)
 
-        if not any_data:
-            ax.set_visible(False)
-            continue
-
-        # x-axis
-        ax.set_xscale("log", base=2)
-        ax.set_yscale("log")
-        xticks = sorted(all_msgs)
-        ax.set_xticks(xticks)
-        ax.set_xticklabels([_bytes_label(int(x)) for x in xticks],
-                           rotation=40, ha="right", fontsize=7)
-        ax.xaxis.set_minor_formatter(ticker.NullFormatter())
-        ax.xaxis.set_minor_locator(ticker.NullLocator())
-
-        # y-axis: shared limits
-        ax.set_ylim(y_min_global, y_max_global)
-        ax.yaxis.set_major_formatter(ticker.FuncFormatter(_time_label))
-        ax.yaxis.set_minor_formatter(ticker.NullFormatter())
-
         if col == 0:
-            plt.setp(ax.get_yticklabels(), fontsize=7)
-            ax.set_ylabel("Broadcast time (mean)", fontsize=9, labelpad=4)
+            ax.set_ylabel("Broadcast time (mean)", fontsize=12, labelpad=0)
 
-        ax.set_xlabel("Message size", fontsize=9, labelpad=4)
+        plt.setp(ax.get_yticklabels(), fontsize=9)
+        ax.set_xlabel("Message size", fontsize=12, labelpad=4)
+        plt.setp(ax.get_xticklabels(), rotation=40, ha="right", fontsize=9)
         ax.set_title(f"{topo_label},  $N = {N}$",
-                     fontsize=11, fontweight="bold", pad=8)
+                     fontsize=12, fontweight="bold", pad=8)
 
         # Legend only on first panel
         if col == 0:
-            ax.legend(fontsize=7, loc="upper left", handlelength=2.2,
+            ax.legend(fontsize=9, loc="upper left", handlelength=2.2,
                       borderpad=0.4, labelspacing=0.35)
 
-        ax.grid(True, which="major", linewidth=0.3, color="#b0b0b0", alpha=0.6)
-        ax.grid(True, which="minor", linewidth=0.15, color="#d0d0d0", alpha=0.4)
+        ax.grid(True, which="major", axis="y", linewidth=0.8,
+                color="#888888", alpha=0.7)
+        ax.grid(True, which="minor", axis="y", linewidth=0.3,
+                color="#bbbbbb", alpha=0.4)
+        ax.grid(True, which="major", axis="x", linewidth=0.3,
+                color="#b0b0b0", alpha=0.5)
         for spine in ax.spines.values():
-            spine.set_color("#555555")
+            spine.set_color("#333333")
+            spine.set_linewidth(1.2)
 
-    fig.tight_layout(pad=1.0)
+    fig.subplots_adjust(left=0.06, right=0.94, bottom=0.18, top=0.88,
+                        wspace=0.08)
 
     FIGS.mkdir(exist_ok=True)
     pdf = FIGS / f"{topology}_1by4.pdf"
     png = FIGS / f"{topology}_1by4.png"
-    fig.savefig(pdf, bbox_inches="tight")
-    fig.savefig(png, dpi=300, bbox_inches="tight",
-                facecolor="white", edgecolor="none")
+    fig.savefig(pdf)
+    fig.savefig(png, dpi=300, facecolor="white", edgecolor="none")
+    print(f"  {pdf}")
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+    return pdf
+
+
+TOPOLOGIES = ["2Dmesh", "Butterfly", "Dragonfly", "FatTree"]
+
+
+def generate_1by4_byN(N, show=False):
+    """Create a 1×4 figure for one N value across 4 topologies."""
+
+    # First pass: collect global y-range and ALL message sizes
+    y_min_global, y_max_global = np.inf, -np.inf
+    all_msgs_global = set()
+    for topo in TOPOLOGIES:
+        for algo in ALGORITHMS:
+            msg, mu = load_data(topo, algo, N)
+            if msg is None:
+                continue
+            y_min_global = min(y_min_global, mu.min())
+            y_max_global = max(y_max_global, mu.max())
+            all_msgs_global.update(msg.tolist())
+
+    if y_min_global == np.inf:
+        print(f"  (no data for N={N})")
+        return None
+
+    y_min_global /= 2.0
+    y_max_global *= 2.0
+    global_xticks = sorted(all_msgs_global)
+    global_xlim = (global_xticks[0] / 1.5, global_xticks[-1] * 1.5)
+
+    fig, axes = plt.subplots(1, 4, figsize=(20, 4.0),
+                             sharey=True, sharex=True)
+
+    axes[0].set_xscale("log", base=2)
+    axes[0].set_yscale("log")
+    axes[0].set_xlim(global_xlim)
+    axes[0].set_ylim(y_min_global, y_max_global)
+    axes[0].set_xticks(global_xticks)
+    axes[0].set_xticklabels([_bytes_label(int(x)) for x in global_xticks],
+                             rotation=40, ha="right", fontsize=9)
+    axes[0].xaxis.set_minor_formatter(ticker.NullFormatter())
+    axes[0].xaxis.set_minor_locator(ticker.NullLocator())
+    axes[0].yaxis.set_major_formatter(ticker.FuncFormatter(_time_label))
+    axes[0].yaxis.set_minor_formatter(ticker.NullFormatter())
+
+    for col, (topo, ax) in enumerate(zip(TOPOLOGIES, axes)):
+        topo_label = TOPOLOGY_LABEL.get(topo, topo)
+        for algo in ALGORITHMS:
+            label, color, marker, ls, ecolor = ALGO_STYLE[algo]
+            msg, mu = load_data(topo, algo, N)
+            if msg is None:
+                continue
+            ax.plot(msg, mu, ls, color=color,
+                    marker=marker, markersize=4.5, markeredgecolor=ecolor,
+                    markeredgewidth=0.5, linewidth=1.3,
+                    label=label, zorder=3)
+
+        if col == 0:
+            ax.set_ylabel("Broadcast time (mean)", fontsize=12, labelpad=0)
+
+        plt.setp(ax.get_yticklabels(), fontsize=9)
+        ax.set_xlabel("Message size", fontsize=12, labelpad=4)
+        plt.setp(ax.get_xticklabels(), rotation=40, ha="right", fontsize=9)
+        ax.set_title(f"{topo_label},  $N = {N}$",
+                     fontsize=12, fontweight="bold", pad=8)
+
+        if col == 0:
+            ax.legend(fontsize=9, loc="upper left", handlelength=2.2,
+                      borderpad=0.4, labelspacing=0.35)
+
+        ax.grid(True, which="major", axis="y", linewidth=0.8,
+                color="#888888", alpha=0.7)
+        ax.grid(True, which="minor", axis="y", linewidth=0.3,
+                color="#bbbbbb", alpha=0.4)
+        ax.grid(True, which="major", axis="x", linewidth=0.3,
+                color="#b0b0b0", alpha=0.5)
+        for spine in ax.spines.values():
+            spine.set_color("#333333")
+            spine.set_linewidth(1.2)
+
+    fig.subplots_adjust(left=0.04, right=0.99, bottom=0.18, top=0.88,
+                        wspace=0.08)
+
+    FIGS.mkdir(exist_ok=True)
+    pdf = FIGS / f"N{N}_1by4.pdf"
+    png = FIGS / f"N{N}_1by4.png"
+    fig.savefig(pdf)
+    fig.savefig(png, dpi=300, facecolor="white", edgecolor="none")
     print(f"  {pdf}")
 
     if show:
@@ -216,19 +310,24 @@ def main():
         description="Generate 1×4 figures (1 topology, 4 sizes)")
     parser.add_argument("--topo", type=str, default=None,
                         help="Single topology to plot (default: all)")
+    parser.add_argument("--N", type=int, default=None,
+                        help="Generate a 1×4 by N (4 topologies for one N)")
     parser.add_argument("--show", action="store_true")
     args = parser.parse_args()
 
-    topologies = sorted(
-        d.name for d in DATA.iterdir()
-        if d.is_dir() and not d.name.startswith(".")
-    )
+    if args.N is not None:
+        generate_1by4_byN(args.N, show=args.show)
+    else:
+        topologies = sorted(
+            d.name for d in DATA.iterdir()
+            if d.is_dir() and not d.name.startswith(".")
+        )
 
-    if args.topo:
-        topologies = [args.topo]
+        if args.topo:
+            topologies = [args.topo]
 
-    for topo in topologies:
-        generate_1by4(topo, show=args.show)
+        for topo in topologies:
+            generate_1by4(topo, show=args.show)
 
     print("\nDone.")
 

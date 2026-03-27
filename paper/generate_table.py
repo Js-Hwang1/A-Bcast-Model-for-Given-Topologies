@@ -37,7 +37,7 @@ N_VALUES = [128, 256, 512, 1024]
 MSG_SIZES = [65536, 262144, 1048576, 4194304, 16777216, 67108864, 134217728]
 
 STATS = ["mean_sec", "max_sec", "min_sec", "stdev_sec"]
-STAT_HEADER = [r"$\bar{t}$", "max", "min", r"$\sigma$"]
+STAT_HEADER = [r"$\bar{T}$", r"$T_{\max}$", r"$T_{\min}$", r"$\sigma$"]
 
 
 def bytes_label(b):
