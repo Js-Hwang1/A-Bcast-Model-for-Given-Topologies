@@ -1,0 +1,7 @@
+49 init
+49 barrier
+49 bcast 4194304 0 6 
+49 reduce 1 0 0 0 
+49 reduce 1 0 0 1 
+49 barrier
+49 finalize

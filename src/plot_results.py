@@ -69,6 +69,7 @@ TOPOLOGY_LABEL = {
     "Butterfly": "Butterfly",
     "Dragonfly": "Dragonfly",
     "FatTree":   "Fat-Tree",
+    "16K3":      "16K3",
 }
 
 
@@ -201,6 +202,65 @@ def plot_topology(topology, N, show=False):
     return pdf
 
 
+def plot_topology_linear(topology, N, show=False):
+    """Linear-scale version of plot_topology."""
+    fig, ax = plt.subplots(figsize=(5.5, 4.0))
+
+    any_data = False
+    all_msgs = set()
+    for algo in ALGORITHMS:
+        label, color, marker, ls, ecolor = ALGO_STYLE[algo]
+        msg, mu = load_data(topology, algo, N)
+        if msg is None:
+            continue
+        any_data = True
+        all_msgs.update(msg.tolist())
+
+        # Convert to MB and ms for linear readability
+        msg_mb = msg / (1024**2)
+        mu_ms = mu * 1e3
+
+        ax.plot(msg_mb, mu_ms, ls, color=color,
+                marker=marker, markersize=4.5, markeredgecolor=ecolor,
+                markeredgewidth=0.5, linewidth=1.3,
+                label=label, zorder=3)
+
+    if not any_data:
+        plt.close(fig)
+        return None
+
+    ax.set_xlabel("Message Size (MB)", fontsize=9, labelpad=4)
+    ax.set_ylabel("Mean Broadcast Time (ms)", fontsize=9, labelpad=4)
+
+    topo_label = TOPOLOGY_LABEL.get(topology, topology)
+    ax.set_title(f"{topo_label},  $N = {N}$",
+                 fontsize=11, fontweight="bold", pad=8)
+
+    ax.legend(fontsize=7, loc="upper left", handlelength=2.2,
+              borderpad=0.4, labelspacing=0.35)
+
+    ax.grid(True, which="major", linewidth=0.3, color="#b0b0b0", alpha=0.6)
+
+    for spine in ax.spines.values():
+        spine.set_color("#555555")
+
+    fig.tight_layout(pad=1.0)
+
+    FIGS.mkdir(exist_ok=True)
+    pdf = FIGS / f"{topology}_N{N}_linear.pdf"
+    png = FIGS / f"{topology}_N{N}_linear.png"
+    fig.savefig(pdf, bbox_inches="tight")
+    fig.savefig(png, dpi=300, bbox_inches="tight",
+                facecolor="white", edgecolor="none")
+    print(f"  {pdf}")
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+    return pdf
+
+
 # ──────────────────────── main ─────────────────────────────────────
 
 def main():
@@ -208,6 +268,8 @@ def main():
         description="Plot broadcast latency vs message size")
     parser.add_argument("--show", action="store_true",
                         help="Open figures in a window")
+    parser.add_argument("--linear", type=str, default=None,
+                        help="Generate linear-scale plot for a topology (e.g. 16K3)")
     args = parser.parse_args()
 
     topologies = sorted(
@@ -231,11 +293,17 @@ def main():
     print(f"Algorithms : {ALGORITHMS}")
     print()
 
-    for topo in topologies:
+    if args.linear:
         for N in sorted(n_values):
-            pdf = plot_topology(topo, N, show=args.show)
+            pdf = plot_topology_linear(args.linear, N, show=args.show)
             if pdf is None:
-                print(f"  (no data for {topo} N={N})")
+                print(f"  (no data for {args.linear} N={N})")
+    else:
+        for topo in topologies:
+            for N in sorted(n_values):
+                pdf = plot_topology(topo, N, show=args.show)
+                if pdf is None:
+                    print(f"  (no data for {topo} N={N})")
 
     print("\nDone.")
 

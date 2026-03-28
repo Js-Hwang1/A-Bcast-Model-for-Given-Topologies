@@ -1,0 +1,7 @@
+39 init
+39 barrier
+39 bcast 4194304 0 6 
+39 reduce 1 0 0 0 
+39 reduce 1 0 0 1 
+39 barrier
+39 finalize

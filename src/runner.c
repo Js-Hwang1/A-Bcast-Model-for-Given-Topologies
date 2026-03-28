@@ -372,6 +372,7 @@ static double run_bine(void *buf, int count, int rank, int size, int root)
 #define TOPO_BUTTERFLY 2
 #define TOPO_FATTREE   3
 #define TOPO_DRAGONFLY 4
+#define TOPO_GENERIC   5
 
 typedef struct {
     int type;
@@ -434,6 +435,8 @@ static int parse_topo_cfg(const char *path, topo_cfg_t *cfg)
                    &cfg->dragonfly.G, &cfg->dragonfly.C,
                    &cfg->dragonfly.R, &cfg->dragonfly.P) != 4)
             { fclose(fp); return -1; }
+    } else if (strcmp(type, "generic") == 0) {
+        cfg->type = TOPO_GENERIC;
     } else {
         fclose(fp); return -1;
     }
@@ -482,6 +485,12 @@ static int get_neighbors_sorted(const topo_cfg_t *cfg, int u, int size,
             if (i / hpl != my_leaf) nbrs[n++] = i;
         break;
     }
+    case TOPO_GENERIC:
+        /* No structural adjacency — return all other nodes.
+         * BFS caller will visit in this order (effectively flat). */
+        for (int i = 0; i < size; i++)
+            if (i != u) nbrs[n++] = i;
+        break;
     case TOPO_DRAGONFLY: {
         int P = cfg->dragonfly.P, R = cfg->dragonfly.R;
         int C = cfg->dragonfly.C, G = cfg->dragonfly.G;

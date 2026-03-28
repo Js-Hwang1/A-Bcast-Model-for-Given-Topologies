@@ -1,0 +1,7 @@
+73 init
+73 barrier
+73 bcast 4194304 0 6 
+73 reduce 1 0 0 0 
+73 reduce 1 0 0 1 
+73 barrier
+73 finalize

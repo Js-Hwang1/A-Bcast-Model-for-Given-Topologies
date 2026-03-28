@@ -1,0 +1,7 @@
+44 init
+44 barrier
+44 bcast 4194304 0 6 
+44 reduce 1 0 0 0 
+44 reduce 1 0 0 1 
+44 barrier
+44 finalize

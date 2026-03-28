@@ -17,6 +17,7 @@ set -euo pipefail
 #  OPTIONS
 # ============================================================
 DRY_RUN=0
+TRACE=0
 HOST_SPEED="2000Gf"
 DOCKER_IMG="bcast"
 
@@ -24,9 +25,10 @@ DOCKER_IMG="bcast"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run)  DRY_RUN=1; shift ;;
+        --trace)    TRACE=1; shift ;;
         -h|--help)
-            echo "Usage: $0 [--dry-run] <algo> <topo> <N> <msg_bytes> [root]"
-            echo "       $0 [--dry-run] all"
+            echo "Usage: $0 [--dry-run] [--trace] <algo> <topo> <N> <msg_bytes> [root]"
+            echo "       $0 [--dry-run] [--trace] all"
             echo ""
             echo "Arguments:"
             echo "  algo       : mpi, srda, pipe, bine, bbs, glf, obfs, ffgb, test"
@@ -35,14 +37,19 @@ while [[ $# -gt 0 ]]; do
             echo "  msg_bytes  : e.g. 65536, 1048576, 67108864"
             echo "  root       : root rank (omit to sweep all roots)"
             echo ""
+            echo "Flags:"
+            echo "  --trace    : Enable Paje tracing; outputs .trace, .pjdump.csv,"
+            echo "               and .states.csv into trace/"
+            echo ""
             echo "Examples:"
             echo "  $0 bbs Dragonfly 128 65536        # all roots"
             echo "  $0 bbs Dragonfly 128 65536 0      # root=0 only"
-            echo "  $0 mpi Butterfly 256 1048576"
+            echo "  $0 --trace mpi 2Dmesh 128 4194304 0  # with tracing"
             echo "  $0 all                            # run all combos"
             echo "  $0 --dry-run bbs FatTree 512 4194304"
             echo ""
             echo "Output: results written to project root as <algo>_<topo>_N<N>_MSG<msg>[_R<root>].json"
+            echo "        with --trace: trace files written to trace/"
             exit 0 ;;
         -*) echo "Unknown flag: $1" >&2; exit 1 ;;
         *)  break ;;
@@ -258,6 +265,12 @@ for TOPO in "${TOPOS[@]}"; do
                 echo ""
                 echo "--- $ALGO $TOPO N=$N MSG=$MSG NC=$NC NP=$NP root=${ROOT_ARG:-all} ---"
 
+                # Trace file paths
+                TRACE_BASE="${TOPO}_N${N}_${ALGO}_MSG${MSG}_R${ROOT_ARG:-0}"
+                TRACEFILE="$PROJ_DIR/trace/${TRACE_BASE}.trace"
+                PJDUMPFILE="$PROJ_DIR/trace/${TRACE_BASE}.pjdump.csv"
+                STATESCSV="$PROJ_DIR/trace/${TRACE_BASE}.states.csv"
+
                 if [[ "$RUNTIME" == "docker" ]]; then
                     CMD="$DOCKER_RUN smpirun -np $NP"
                     CMD+=" -platform $(relpath "$PLAT") -hostfile $(relpath "$HF")"
@@ -265,6 +278,13 @@ for TOPO in "${TOPOS[@]}"; do
                     CMD+=" --cfg=smpi/simulate-computation:no"
                     CMD+=" --cfg=smpi/display-timing:yes"
                     CMD+=" --log=root.thres:warning"
+                    if [[ $TRACE -eq 1 ]]; then
+                        CMD+=" -trace"
+                        CMD+=" --cfg=tracing/filename:trace/${TRACE_BASE}.trace"
+                        CMD+=" --cfg=tracing/smpi:yes"
+                        CMD+=" --cfg=tracing/smpi/internals:yes"
+                        #CMD+=" --cfg=tracing/smpi/display-sizes:yes"  # not available in SimGrid 3.35/4.1
+                    fi
                     CMD+=" bin/runner $ALGO $MSG $NC $RUNNER_ROOT $(relpath "$OUTFILE")"
                     [[ -n "$TOPO_ARG" ]] && CMD+=" $(relpath "$TOPO_ARG")"
                 else
@@ -273,6 +293,13 @@ for TOPO in "${TOPOS[@]}"; do
                     CMD+=" --cfg=smpi/simulate-computation:no"
                     CMD+=" --cfg=smpi/display-timing:yes"
                     CMD+=" --log=root.thres:warning"
+                    if [[ $TRACE -eq 1 ]]; then
+                        CMD+=" -trace"
+                        CMD+=" --cfg=tracing/filename:$TRACEFILE"
+                        CMD+=" --cfg=tracing/smpi:yes"
+                        CMD+=" --cfg=tracing/smpi/internals:yes"
+                        #CMD+=" --cfg=tracing/smpi/display-sizes:yes"  # not available in SimGrid 3.35/4.1
+                    fi
                     CMD+=" $BIN $ALGO $MSG $NC $RUNNER_ROOT $OUTFILE"
                     [[ -n "$TOPO_ARG" ]] && CMD+=" $TOPO_ARG"
                 fi
@@ -281,6 +308,33 @@ for TOPO in "${TOPOS[@]}"; do
                     echo "  $CMD"
                 else
                     eval "$CMD"
+
+                    # Post-process trace into CSV files
+                    if [[ $TRACE -eq 1 && -f "$TRACEFILE" ]]; then
+                        echo "  Trace: $TRACEFILE"
+                        # Try pj_dump (native or docker)
+                        if command -v pj_dump &>/dev/null; then
+                            DYLD_FALLBACK_LIBRARY_PATH="/usr/local/lib:${DYLD_FALLBACK_LIBRARY_PATH:-}" \
+                                pj_dump -z "$TRACEFILE" 2>/dev/null > "$PJDUMPFILE"
+                        elif [[ "$RUNTIME" == "docker" ]]; then
+                            $DOCKER_RUN pj_dump -z "trace/${TRACE_BASE}.trace" \
+                                > "$PJDUMPFILE" 2>/dev/null
+                        fi
+                        if [[ -s "$PJDUMPFILE" ]]; then
+                            echo "  -> $PJDUMPFILE"
+                            # Extract State rows into .states.csv
+                            python3 -c "
+import csv, sys
+with open(sys.argv[1], newline='') as inp, open(sys.argv[2], 'w', newline='') as out:
+    reader = csv.reader(inp, skipinitialspace=True)
+    writer = csv.writer(out)
+    for row in reader:
+        if row and row[0] == 'State':
+            writer.writerow(row)
+" "$PJDUMPFILE" "$STATESCSV"
+                            echo "  -> $STATESCSV ($(wc -l < "$STATESCSV") rows)"
+                        fi
+                    fi
                 fi
             done
         done

@@ -1503,14 +1503,36 @@ static int bbs_compute_trees(const char *topo_file, int root, int N,
     topo_data_t td;
     if (topo_data_load(topo_file, &td) != 0) return -1;
 
-    /* 1-hop threshold */
-    float lat_1hop = 1e30f;
-    for (int i = 0; i < N; i++)
-        for (int j = 0; j < N; j++) {
-            float l = td.lat[(size_t)i * N + j];
-            if (l > 0.0f && l < lat_1hop) lat_1hop = l;
+    /* 1-hop threshold: find the natural gap between direct links and
+     * multi-hop shortest paths.  Collect all unique nonzero latencies,
+     * sort them, and pick the threshold at the first large gap (>25%).
+     * Falls back to 1.01 × min_latency for uniform-link topologies. */
+    float lat_thresh;
+    {
+        int ncand = 0;
+        float *cand = (float *)malloc((size_t)N * N * sizeof(float));
+        for (int i = 0; i < N; i++)
+            for (int j = 0; j < N; j++) {
+                float l = td.lat[(size_t)i * N + j];
+                if (l > 0.0f) cand[ncand++] = l;
+            }
+        /* Simple insertion sort on unique values (N*N is small) */
+        for (int i = 1; i < ncand; i++) {
+            float key = cand[i];
+            int j = i - 1;
+            while (j >= 0 && cand[j] > key) { cand[j+1] = cand[j]; j--; }
+            cand[j+1] = key;
         }
-    float lat_thresh = lat_1hop * 1.01f;
+        /* Find first gap > 25% */
+        lat_thresh = cand[0] * 1.01f;   /* default: uniform links */
+        for (int i = 1; i < ncand; i++) {
+            if (cand[i] > cand[i-1] * 1.25f) {
+                lat_thresh = (cand[i-1] + cand[i]) * 0.5f;  /* midpoint */
+                break;
+            }
+        }
+        free(cand);
+    }
 
     /* Build 1-hop adjacency matrix */
     size_t NN = (size_t)N * N;

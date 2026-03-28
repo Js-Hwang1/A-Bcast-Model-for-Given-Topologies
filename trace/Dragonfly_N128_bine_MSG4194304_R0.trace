@@ -1,5 +1,5 @@
-#This file was generated using SimGrid-4.1.0
-#[/Users/j/Desktop/A-Bcast-Model-for-Given-Topologies/bin/runner /Users/j/Desktop/A-Bcast-Model-for-Given-Topologies/topo/Dragonfly/platform_dragonfly_128.xml bine 4194304 128 0 _ _ ]
+#This file was generated using SimGrid-3.35.0
+#[bin/runner topo/Dragonfly/platform_dragonfly_128.xml bine 4194304 512 0 bine_Dragonfly_N128_MSG4194304_R0.json ]
 %EventDef PajeDefineContainerType 0
 %       Alias string
 %       Type string

@@ -1,0 +1,7 @@
+52 init
+52 barrier
+52 bcast 4194304 0 6 
+52 reduce 1 0 0 0 
+52 reduce 1 0 0 1 
+52 barrier
+52 finalize

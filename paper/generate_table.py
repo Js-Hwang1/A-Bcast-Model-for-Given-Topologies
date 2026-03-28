@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Generate LaTeX tables of broadcast results — one table per N value.
-Each table has 4 topology groups x 6 algorithms.
-Columns: 7 message sizes, each with mean, max, min, stdev sub-columns.
+Format: rows = Topology > Message Size > Metric, columns = algorithms.
 Best (lowest mean) per topology+msg_size is bolded.
 
 Output: paper/paste.tex
@@ -18,7 +17,7 @@ OUT  = ROOT / "paper" / "paste.tex"
 ALGORITHMS = ["bbs", "bine", "glf", "pipe", "srda", "mpi"]
 ALGO_LABEL = {
     "bbs":  "BBS",
-    "bine": "BInE",
+    "bine": "Bine",
     "glf":  "GLF",
     "pipe": "Pipeline",
     "srda": "SRDA",
@@ -37,7 +36,7 @@ N_VALUES = [128, 256, 512, 1024]
 MSG_SIZES = [65536, 262144, 1048576, 4194304, 16777216, 67108864, 134217728]
 
 STATS = ["mean_sec", "max_sec", "min_sec", "stdev_sec"]
-STAT_HEADER = [r"$\bar{T}$", r"$T_{\max}$", r"$T_{\min}$", r"$\sigma$"]
+STAT_LABEL = [r"$\bar{T}$", r"$T_{\max}$", r"$T_{\min}$", r"$\sigma$"]
 
 
 def bytes_label(b):
@@ -50,7 +49,7 @@ def bytes_label(b):
 
 
 def fmt_time(sec):
-    """Format seconds as a plain number+unit string, no special commands."""
+    """Format seconds as a plain number+unit string."""
     if sec is None:
         return "---"
     if sec < 1e-6:
@@ -64,11 +63,11 @@ def fmt_time(sec):
     if sec < 1e-3:
         v = sec * 1e6
         if v < 10:
-            return f"{v:.2f} us"
+            return f"{v:.2f} \\textmu s"
         elif v < 100:
-            return f"{v:.1f} us"
+            return f"{v:.1f} \\textmu s"
         else:
-            return f"{v:.0f} us"
+            return f"{v:.0f} \\textmu s"
     if sec < 1:
         v = sec * 1e3
         if v < 10:
@@ -92,36 +91,27 @@ def generate_table(N):
     n_algo = len(ALGORITHMS)
     n_msg = len(MSG_SIZES)
     n_stat = len(STATS)
+    n_rows_per_topo = n_msg * n_stat  # 28
 
-    col_spec = "ll" + "rrrr" * n_msg
+    # Column spec: Topology | Message Size | Metric | 6 algorithm columns
+    col_spec = "lll" + "r" * n_algo
 
     lines = []
     lines.append(r"\begin{tableorg}[htbp]")
     lines.append(r"\centering")
     lines.append(r"\caption{Broadcast time for $N = " + str(N) + r"$.}")
-    lines.append(r"\label{tab:results_N" + str(N) + r"}")
-    lines.append(r"\rotatebox{90}{\resizebox{0.9\textheight}{!}{%")
+    lines.append(r"\label{table" + str(N) + r"}")
+    lines.append(r"\setlength{\tabcolsep}{4pt}")
+    lines.append(r"\resizebox{!}{0.5\textheight}{%")
+    lines.append(r"\setlength{\tabcolsep}{20pt}")
     lines.append(r"\begin{tabular}{" + col_spec + r"}")
     lines.append(r"\toprule")
 
-    # Header row 1: msg size labels
-    hdr1 = ["", ""]
-    for msg in MSG_SIZES:
-        hdr1.append(r"\multicolumn{4}{c}{" + bytes_label(msg) + r"}")
-    lines.append(" & ".join(hdr1) + r" \\")
-
-    # Cmidrules
-    rules = []
-    for i in range(n_msg):
-        s = 3 + i * 4
-        rules.append(r"\cmidrule(lr){" + f"{s}-{s+3}" + r"}")
-    lines.append(" ".join(rules))
-
-    # Header row 2: stat labels
-    hdr2 = ["Topology", "Algorithm"]
-    for _ in range(n_msg):
-        hdr2.extend(STAT_HEADER)
-    lines.append(" & ".join(hdr2) + r" \\")
+    # Header row
+    hdr = ["Topology", "Message Size", "Metric"]
+    for algo in ALGORITHMS:
+        hdr.append(ALGO_LABEL[algo])
+    lines.append(" & ".join(hdr) + r" \\")
     lines.append(r"\midrule")
 
     for t_idx, topo in enumerate(TOPOLOGIES):
@@ -138,17 +128,28 @@ def generate_table(N):
             if vals:
                 best_mean[msg] = min(vals)
 
-        for a_idx, algo in enumerate(ALGORITHMS):
-            parts = []
-            if a_idx == 0:
-                parts.append(r"\multirow{" + str(n_algo) + r"}{*}{" + topo_lbl + r"}")
-            else:
-                parts.append("")
-            parts.append(ALGO_LABEL[algo])
+        for m_idx, msg in enumerate(MSG_SIZES):
+            for s_idx, (stat, stat_lbl) in enumerate(zip(STATS, STAT_LABEL)):
+                parts = []
 
-            for msg in MSG_SIZES:
-                rec = load_record(topo, algo, N, msg)
-                for stat in STATS:
+                # Topology column (multirow on first stat of first msg)
+                if m_idx == 0 and s_idx == 0:
+                    parts.append(r"\multirow{" + str(n_rows_per_topo) + r"}{*}{" + topo_lbl + r"}")
+                else:
+                    parts.append("")
+
+                # Message size column (multirow on first stat)
+                if s_idx == 0:
+                    parts.append(r"\multirow{" + str(n_stat) + r"}{*}{" + bytes_label(msg) + r"}")
+                    # First stat row gets the metric with leading whitespace
+                    parts.append("  " + stat_lbl)
+                else:
+                    parts.append("")
+                    parts.append(stat_lbl)
+
+                # Algorithm values
+                for algo in ALGORITHMS:
+                    rec = load_record(topo, algo, N, msg)
                     if rec is None:
                         parts.append("---")
                     else:
@@ -158,14 +159,40 @@ def generate_table(N):
                             s = r"\textbf{" + s + r"}"
                         parts.append(s)
 
-            lines.append(" & ".join(parts) + r" \\")
+                # Build the row
+                # For non-first stat rows, prefix with "& &" style
+                if s_idx == 0 and m_idx == 0:
+                    # First msg, first stat: topology multirow & msg multirow & stat
+                    row = parts[0] + "\n& " + parts[1] + "\n  & " + parts[2]
+                elif s_idx == 0:
+                    # First stat of subsequent msgs
+                    row = "& " + parts[1] + "\n  & " + parts[2]
+                else:
+                    # Subsequent stats
+                    row = "& & " + parts[2]
 
+                # Append algorithm values
+                for p in parts[3:]:
+                    row += " & " + p
+                row += r" \\"
+
+                lines.append(row)
+
+            # cmidrule between message sizes (but not after the last one)
+            if m_idx < n_msg - 1:
+                lines.append(r"\cmidrule{2-9}")
+                lines.append("")
+
+        # midrule between topologies, blank line after last msg of a topo
         if t_idx < len(TOPOLOGIES) - 1:
+            lines.append("")
             lines.append(r"\midrule")
+            lines.append("")
 
+    lines.append("")
     lines.append(r"\bottomrule")
     lines.append(r"\end{tabular}%")
-    lines.append(r"}}")
+    lines.append(r"}")
     lines.append(r"\end{tableorg}")
 
     return "\n".join(lines)

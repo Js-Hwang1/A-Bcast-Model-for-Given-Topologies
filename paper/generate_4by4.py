@@ -52,7 +52,7 @@ N_VALUES = [128, 256, 512, 1024]
 TOPOLOGIES = ["2Dmesh", "Butterfly", "Dragonfly", "FatTree"]
 
 ALGO_STYLE = {
-    "bine": ("BInE",      "#CD2032", "o",  "-", "#9A1624"),
+    "bine": ("Bine",      "#CD2032", "o",  "-", "#9A1624"),
     "glf":  ("GLF",       "#1560BD", "s",  "-", "#0E4382"),
     "bbs":  ("BBS",       "#1FAD3F", "^",  "-", "#14762B"),
     "srda": ("SRDA",      "#DAA520", "D",  "-", "#A07B18"),
