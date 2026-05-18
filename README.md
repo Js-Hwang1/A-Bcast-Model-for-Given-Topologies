@@ -1,8 +1,6 @@
-# Broadcast Algorithm Simulation Framework
-
 [![arXiv](https://img.shields.io/badge/arXiv-2510.18058-b31b1b.svg)](https://arxiv.org/abs/2510.18058)
 
-This repository introduces **Broadcast by Balanced Saturation (BBS)** — a family of tree-based, pipelined broadcast algorithms that optimize communication efficiency across diverse network topologies. Alongside BBS, it provides baseline broadcast algorithms and a [SimGrid](https://simgrid.org/) SMPI harness for head-to-head comparison on four interconnect models (2D Mesh, Butterfly, Dragonfly, Fat-Tree) at scales from 128 to 1,024 nodes.
+This repository introduces **Broadcast by Balanced Saturation (BBS)** — a family of tree-based, pipelined broadcast algorithms that optimize communication efficiency across diverse network topologies. Alongside BBS, it provides baseline broadcast algorithms and a [SimGrid](https://simgrid.org/) SMPI harness for head-to-head comparison on four interconnect models (2D Mesh, Butterfly, Dragonfly, Fat-Tree) at scales from 128 to 1,024 nodes. The figure below shows experimental results at N=512.
 
 <p align="center">
   <img src="figs/N512_1by4.png" alt="Broadcast algorithm comparison across topologies at N=512" width="1200">
