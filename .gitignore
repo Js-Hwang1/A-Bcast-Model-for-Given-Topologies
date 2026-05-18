@@ -1,13 +1,9 @@
-LEGACY/
-paper.tex
 .claude
 .DS_Store
-*.pdf
 .env
 bcast.def
 *.tex
 bin/
-slurm/
 __pycache__/
 *.pyc
 *.aux
@@ -15,5 +11,6 @@ __pycache__/
 *.out
 *.png
 simgrid/
-seawulf/
 encodings/
+data/
+figs/

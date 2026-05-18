@@ -1,7 +1,0 @@
-38 init
-38 barrier
-38 bcast 4194304 0 6 
-38 reduce 1 0 0 0 
-38 reduce 1 0 0 1 
-38 barrier
-38 finalize
