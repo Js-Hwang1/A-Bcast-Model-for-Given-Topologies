@@ -37,8 +37,6 @@ One of the following:
 | `bine` | Binomial | Binomial tree broadcast |
 | `bbs` | BBS | Bandwidth-optimal Broadcast Scheduling -- topology-aware tree construction with contention-free scheduling |
 | `glf` | GLF | Greedy Link-First broadcast |
-| `obfs` | OBFS | Optimal Breadth-First Scheduling |
-| `ffgb` | FFGB | Fastest-First Greedy Broadcast |
 
 ## Topologies
 
@@ -87,15 +85,6 @@ The `root` argument accepts:
 - A batch range: `0-15` (roots 0 through 15)
 - With rank limit: `all:128` or `0-15:128` (for topologies where NP > N)
 
-## HPC (Slurm)
-
-For large-scale runs on HPC clusters, see `slurm/` for job scripts. These use `src/sweep.sh` to distribute roots across nodes with GNU Parallel:
-
-```bash
-src/sweep.sh --algos bbs --topos Dragonfly --sizes 128 \
-    --msgs 65536 --roots 0-127 --sif bcast.sif -j 16
-```
-
 ## Output
 
 Single-root result:
@@ -137,7 +126,6 @@ All-roots bulk result adds `mean_sec`, `stdev_sec`, `min_sec`, `max_sec`, and `p
 │   ├── Dragonfly/
 │   └── FatTree/
 ├── data/                   # Experiment results (JSON)
-├── slurm/                  # HPC job scripts
 ├── encodings/              # Pre-built BBS tree encodings
 ├── figs/                   # Figures
 └── docs/                   # Documentation + references
